@@ -2,10 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const tempRoots: string[] = [];
 const distCliEntry = path.join(process.cwd(), "dist", "cli", "main.js");
+const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 const createProjectFixture = (): string => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "deep-research-dist-cli-"));
@@ -34,6 +35,16 @@ afterEach(() => {
       fs.rmSync(root, { force: true, recursive: true });
     }
   }
+});
+
+beforeAll(() => {
+  const buildResult = spawnSync(packageManager, ["build"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: process.env
+  });
+
+  expect(buildResult.status ?? 1).toBe(0);
 });
 
 describe("dist CLI release surface", () => {

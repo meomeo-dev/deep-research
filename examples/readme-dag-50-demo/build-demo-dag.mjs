@@ -1,3 +1,5 @@
+/* global console, process */
+
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -6,19 +8,20 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../..");
-const cliPath = path.join(repoRoot, "dist/cli/main.js");
+const cliBinary = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const cliBaseArgs = ["exec", "tsx", "src/cli/main.ts"];
 const demoRoot = path.join(__dirname, "project");
 const outputPngPath = path.join(repoRoot, "docs/assets/readme/deep-research-demo-dag-50.png");
 const outputHtmlPath = path.join(__dirname, "deep-research-demo-dag-50.html");
 const summaryPath = path.join(__dirname, "deep-research-demo-dag-50.summary.json");
 
 const phaseOneNodes = [
-  ["RQ", "question", "Should multi-step prompting improve code generation reliability?", "Quantify where multi-step prompting materially improves code generation accuracy and where the extra reasoning cost is wasted.", "active", "untested"],
-  ["LIT_COT", "note", "Prior literature favors structured reasoning on harder tasks", "Survey notes indicate chain-of-thought style prompting tends to help when tasks require decomposition rather than direct retrieval.", "resolved", "supported"],
+  ["RQ", "question", "中文边界验证：多步提示是否应在复杂代码生成任务中默认启用", "这个问题节点故意使用偏长的中文正文来验证导出图片时正文是否会按照五行预算稳定换行并在超出节点容量后自动追加省略号而不是继续向卡片外部溢出从而帮助排查真实环境中的文字越界问题。", "active", "untested"],
+  ["LIT_COT", "note", "中文证据验证：结构化推理在困难任务中通常更稳定但成本更高", "这条文献笔记同时承担边界测试职责它会模拟没有空格分隔的大段中文描述观察标题两行限制与正文五行限制在导出 PNG 和 HTML 时是否仍能保持一致不会因为字符变宽而跑出节点外框。", "resolved", "supported"],
   ["LIT_BENCH", "note", "Benchmark landscape clusters around HumanEval and MBPP", "Most comparable code-generation studies report results on HumanEval or MBPP, making them suitable for a README-friendly replication graph.", "resolved", "supported"],
   ["LIT_METRIC", "note", "Pass@k remains useful but hides cost and failure origin", "Existing reports over-index on Pass@1 and Pass@5 while under-reporting token overhead and reasoning-vs-code failure sources.", "resolved", "supported"],
   ["HYP_COMPLEXITY", "hypothesis", "Complex tasks should gain more than easy tasks", "The benefit of multi-step prompting should concentrate on medium and hard coding problems that require decomposition and edge-case planning.", "ready", "untested"],
-  ["HYP_OVERHEAD", "hypothesis", "Prompt overhead may erase gains on easy tasks", "If reasoning tokens dominate simple tasks, overall ROI may turn negative even if quality rises slightly.", "ready", "untested"],
+  ["HYP_OVERHEAD", "hypothesis", "中文假设验证：简单任务中的推理开销可能吞噬全部准确率收益", "如果节点中的中文正文已经很长而且任务本身又偏简单那么推理开销不但会增加令牌成本还可能让展示层暴露宽字符换行缺陷因此这个节点被保留下来作为图导出边界回归样本。", "ready", "untested"],
   ["HYP_TRANSFER", "hypothesis", "Cross-benchmark gains should persist but shrink", "A real effect should survive on a second benchmark, though the uplift may compress because task wording and test coverage differ.", "ready", "untested"],
   ["TASK_SCOPE", "task", "Fix the study scope to Python function generation", "Limit the first pass to Python code generation on interview-style function tasks so the example stays readable and reproducible.", "active", "untested"],
   ["TASK_CONTROL", "task", "Fix model, sampling, and cost envelope", "Hold the model family, temperature, and repetition count constant so observed differences come from prompting style rather than drifting conditions.", "active", "untested"],
@@ -56,7 +59,7 @@ const phaseThreeNodes = [
   ["NOTE_REASON_FAIL", "note", "A subset of misses stem from weak reasoning plans", "Manual review finds cases where the model misunderstood the task structure before it even reached code generation.", "resolved", "supported"],
   ["NOTE_CODE_FAIL", "note", "Another subset stems from code emission failures", "Other failures have a plausible plan but still break because of syntax, indexing mistakes, or incomplete edge-case handling.", "resolved", "supported"],
   ["FIND_FAILURE_MIX", "finding", "Failure causes are mixed rather than singular", "The error review indicates that prompt design helps reasoning but does not eliminate code emission mistakes.", "resolved", "supported"],
-  ["FIND_COST", "finding", "Token cost climbs sharply with deeper prompting", "Four-step prompting substantially increases reasoning tokens, turning the quality gain into a cost-sensitive decision instead of a universal default.", "resolved", "supported"]
+  ["FIND_COST", "finding", "中文发现验证：更深层提示会显著抬高推理令牌成本并放大排版压力", "四步提示不仅提高了推理令牌消耗也把节点文案推向更接近真实生产环境的长度这样 README 导出案例就能直接观察标题和正文在中文宽字符条件下是否仍旧遵守两行与五行的显示约束。", "resolved", "supported"]
 ];
 
 const phaseFourNodes = [
@@ -70,7 +73,7 @@ const phaseFourNodes = [
   ["GAP_TAXONOMY", "gap", "Reasoning failure taxonomy needs refinement", "The current error review is good enough for a demo but still too coarse for a production decision framework.", "ready", "inconclusive"],
   ["GAP_INTERACTION", "gap", "Model-method interaction remains unresolved", "Future model releases may compress or amplify the benefit of structured prompting, so the current conclusion must stay conditional.", "ready", "inconclusive"],
   ["CONC_MAIN", "conclusion", "Multi-step prompting improves reliability on harder coding tasks", "The strongest supported claim is that structured multi-step prompting raises code-generation reliability on more complex tasks.", "resolved", "supported"],
-  ["CONC_SELECTIVE", "conclusion", "Use deeper prompting selectively rather than by default", "The cost profile argues for enabling deeper prompting on higher-stakes tasks while keeping direct prompting for simple requests.", "resolved", "supported"],
+  ["CONC_SELECTIVE", "conclusion", "中文结论验证：深度提示应按任务风险选择性启用而不是默认全局打开", "最终结论节点也保留一段偏长中文正文用于验证结论类节点在导出场景中的边界表现确保最重要的高亮卡片同样会自动换行并在超出上限后用省略号收束内容。", "resolved", "supported"],
   ["TASK_NEXT", "task", "Run the next study on more models and prompt families", "The next research cycle should extend the benchmark to more model families and richer prompt strategies.", "ready", "untested"]
 ];
 
@@ -182,7 +185,7 @@ const phases = [
 ];
 
 const runCli = (args) => {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnSync(cliBinary, [...cliBaseArgs, ...args], {
     cwd: repoRoot,
     encoding: "utf8"
   });

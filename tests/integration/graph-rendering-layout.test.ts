@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildGraphSvgDocument,
   computeGraphLayout,
+  measureSvgTextWidth,
+  wrapSvgText,
   type GraphLayoutEdge,
   type GraphLayoutNode
 } from "../../src/cli/graph-rendering";
@@ -10,6 +12,8 @@ const RIGHT_PADDING = 120;
 const BOTTOM_PADDING = 84;
 const SVG_TOP_OFFSET = 24;
 const VISIBLE_BOTTOM_BREATHING_ROOM = 60;
+const CARD_CONTENT_WIDTH = 216 - 32;
+const FONT_FAMILY = "Avenir Next, Segoe UI, sans-serif";
 
 const measureOccupiedBounds = (
   nodes: GraphLayoutNode[],
@@ -34,6 +38,53 @@ const measureOccupiedBounds = (
 };
 
 describe("graph rendering layout bounds", () => {
+  it("wraps and truncates long CJK text within the card line budget", () => {
+    const titleLines = wrapSvgText(
+      "中文节点标题需要在导出图片时稳定换行并在超出两行限制后自动省略尾部信息",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: 14,
+        fontWeight: 700,
+        maxLines: 2,
+        maxWidth: CARD_CONTENT_WIDTH
+      }
+    );
+    const bodyLines = wrapSvgText(
+      "中文正文用于验证节点正文在真实导出场景里不会越过卡片边界并且会按照既定的五行预算进行稳定换行如果内容仍然继续增长则最后一行必须自动追加省略号避免文字直接跑出节点外框同时保留主要语义供排查使用",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: 12,
+        fontWeight: 400,
+        maxLines: 5,
+        maxWidth: CARD_CONTENT_WIDTH
+      }
+    );
+
+    expect(titleLines).toHaveLength(2);
+    expect(titleLines[1]?.endsWith("…")).toBe(true);
+    for (const line of titleLines) {
+      expect(
+        measureSvgTextWidth(line, {
+          fontFamily: FONT_FAMILY,
+          fontSize: 14,
+          fontWeight: 700
+        })
+      ).toBeLessThanOrEqual(CARD_CONTENT_WIDTH);
+    }
+
+    expect(bodyLines).toHaveLength(5);
+    expect(bodyLines[4]?.endsWith("…")).toBe(true);
+    for (const line of bodyLines) {
+      expect(
+        measureSvgTextWidth(line, {
+          fontFamily: FONT_FAMILY,
+          fontSize: 12,
+          fontWeight: 400
+        })
+      ).toBeLessThanOrEqual(CARD_CONTENT_WIDTH);
+    }
+  });
+
   it("keeps right and bottom slack within the shared layout budget", async () => {
     const nodes = [
       {
@@ -163,5 +214,46 @@ describe("graph rendering layout bounds", () => {
 
     expect(svg).toContain(`width="${renderedWidth}" height="${renderedHeight}"`);
     expect(svg).toContain(`viewBox="0 0 ${viewport.width} ${viewport.height}"`);
+  });
+
+  it("renders explicit arrowheads instead of relying on SVG markers", async () => {
+    const nodes = [
+      {
+        body: "Root node for arrowhead rendering.",
+        epistemicState: "supported" as const,
+        id: "node-source",
+        kind: "finding" as const,
+        title: "Arrow source",
+        workflowState: "resolved" as const
+      },
+      {
+        body: "Target node for arrowhead rendering.",
+        epistemicState: "supported" as const,
+        id: "node-target",
+        kind: "conclusion" as const,
+        title: "Arrow target",
+        workflowState: "resolved" as const
+      }
+    ];
+    const edges = [
+      {
+        fromNodeId: "node-source",
+        id: "edge-source-target",
+        kind: "supports" as const,
+        toNodeId: "node-target"
+      }
+    ];
+
+    const { edges: layoutEdges, layoutNodes, viewport } = await computeGraphLayout(nodes, edges, {});
+    const svg = buildGraphSvgDocument({
+      branchName: "arrowhead-render-regression",
+      edges: layoutEdges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).not.toContain("marker-end=");
+    expect(svg).toContain('fill="rgba(100, 116, 139, 0.72)"');
   });
 });

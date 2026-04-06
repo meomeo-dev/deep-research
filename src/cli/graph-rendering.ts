@@ -1,5 +1,6 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import path from "node:path";
+import { Canvas } from "skia-canvas";
 import type {
   BranchRecord,
   EdgeView,
@@ -57,8 +58,11 @@ interface ElkLayoutEdge {
 }
 
 interface WrapTextOptions {
-  maxCharsPerLine: number;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
   maxLines: number;
+  maxWidth: number;
 }
 
 interface NodeCardModel {
@@ -73,6 +77,27 @@ interface NodeCardModel {
   titleLines: string[];
   titleY: number;
 }
+
+const ELLIPSIS = "…";
+const EDGE_STROKE = "rgba(100, 116, 139, 0.54)";
+const EDGE_ARROW_FILL = "rgba(100, 116, 139, 0.72)";
+const EDGE_ARROW_LENGTH = 12;
+const EDGE_ARROW_HALF_WIDTH = 4;
+const WIDE_CHAR_RANGES = [
+  [0x1100, 0x11ff],
+  [0x2e80, 0xa4cf],
+  [0xac00, 0xd7af],
+  [0xf900, 0xfaff],
+  [0xfe10, 0xfe6f],
+  [0xff01, 0xff60],
+  [0xffe0, 0xffe6],
+  [0x1f300, 0x1faff],
+  [0x20000, 0x3fffd]
+] as const;
+const SVG_FONT_FAMILY = "Avenir Next, Segoe UI, sans-serif";
+const TEXT_MEASURE_CANVAS = new Canvas(1, 1);
+const TEXT_MEASURE_CONTEXT = TEXT_MEASURE_CANVAS.getContext("2d");
+const TEXT_WIDTH_CACHE = new Map<string, number>();
 
 const CARD = {
   bodyMaxChars: 32,
@@ -305,13 +330,10 @@ export const buildGraphSvgDocument = (input: {
     "    <filter id=\"card-shadow\" x=\"-20%\" y=\"-20%\" width=\"140%\" height=\"160%\">",
     "      <feDropShadow dx=\"0\" dy=\"10\" stdDeviation=\"12\" flood-color=\"rgba(15,23,42,0.16)\" />",
     "    </filter>",
-    "    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto-start-reverse\">",
-    "      <path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"rgba(100, 116, 139, 0.72)\" />",
-    "    </marker>",
     "  </defs>",
     `  <rect width="${viewWidth}" height="${viewHeight}" fill="url(#paper)" />`,
-    `  <text x="32" y="42" font-family="Avenir Next, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#1e293b">${escapeHtml(input.branchName)}</text>`,
-    `  <text x="32" y="66" font-family="Avenir Next, Segoe UI, sans-serif" font-size="12" fill="#6b7280">Nodes: ${input.nodes.length} · Edges: ${input.edges.length}</text>`,
+    `  <text x="32" y="42" font-family="${SVG_FONT_FAMILY}" font-size="16" font-weight="700" fill="#1e293b">${escapeHtml(input.branchName)}</text>`,
+    `  <text x="32" y="66" font-family="${SVG_FONT_FAMILY}" font-size="12" fill="#6b7280">Nodes: ${input.nodes.length} · Edges: ${input.edges.length}</text>`,
     `  <g transform="translate(0 ${LAYOUT.viewportTopPadding})">${edges}${nodes}</g>`,
     "</svg>"
   ].join("\n");
@@ -342,9 +364,53 @@ const buildGraphOutputPath = (
 };
 
 const renderEdge = (edge: GraphLayoutEdge): string => {
-  return `
-    <path d="${edge.svgPath}" fill="none" stroke="rgba(100, 116, 139, 0.54)" stroke-width="2.5" marker-end="url(#arrow)" />`;
+  const arrowHeadPath = buildArrowHeadPath(edge);
+  return [
+    "",
+    `    <path d="${edge.svgPath}" fill="none" stroke="${EDGE_STROKE}" stroke-width="2.5" />`,
+    `    <path d="${arrowHeadPath}" fill="${EDGE_ARROW_FILL}" stroke="none" />`
+  ].join("\n");
 };
+
+const buildArrowHeadPath = (edge: GraphLayoutEdge): string => {
+  const tip = edge.routePoints.at(-1) ?? { x: edge.toX, y: edge.toY };
+  const base = findArrowBasePoint(edge.routePoints, tip) ?? { x: edge.fromX, y: edge.fromY };
+  const deltaX = tip.x - base.x;
+  const deltaY = tip.y - base.y;
+  const vectorLength = Math.hypot(deltaX, deltaY) || 1;
+  const unitX = deltaX / vectorLength;
+  const unitY = deltaY / vectorLength;
+  const normalX = -unitY;
+  const normalY = unitX;
+  const rearX = tip.x - unitX * EDGE_ARROW_LENGTH;
+  const rearY = tip.y - unitY * EDGE_ARROW_LENGTH;
+  const leftX = rearX + normalX * EDGE_ARROW_HALF_WIDTH;
+  const leftY = rearY + normalY * EDGE_ARROW_HALF_WIDTH;
+  const rightX = rearX - normalX * EDGE_ARROW_HALF_WIDTH;
+  const rightY = rearY - normalY * EDGE_ARROW_HALF_WIDTH;
+
+  return `M ${formatSvgNumber(tip.x)} ${formatSvgNumber(tip.y)} L ${formatSvgNumber(leftX)} ${formatSvgNumber(leftY)} L ${formatSvgNumber(rightX)} ${formatSvgNumber(rightY)} Z`;
+};
+
+const findArrowBasePoint = (
+  routePoints: Array<{ x: number; y: number }>,
+  tip: { x: number; y: number }
+): { x: number; y: number } | undefined => {
+  for (let index = routePoints.length - 2; index >= 0; index -= 1) {
+    const candidate = routePoints[index];
+    if (!candidate) {
+      continue;
+    }
+
+    if (candidate.x !== tip.x || candidate.y !== tip.y) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+};
+
+const formatSvgNumber = (value: number): string => value.toFixed(2);
 
 const renderNode = (node: GraphLayoutNode): string => {
   const card = buildNodeCardModel(node, node.evidence);
@@ -370,17 +436,26 @@ const buildNodeCardModel = (
   const headerLines = wrapSvgText(
     `${node.kind} · ${node.workflowState} · ${node.epistemicState}`,
     {
-      maxCharsPerLine: CARD.metaMaxChars,
-      maxLines: CARD.metaMaxLines
+      fontFamily: SVG_FONT_FAMILY,
+      fontSize: 11,
+      fontWeight: 500,
+      maxLines: CARD.metaMaxLines,
+      maxWidth: CARD.width - CARD.paddingX * 2
     }
   );
   const titleLines = wrapSvgText(node.title, {
-    maxCharsPerLine: CARD.titleMaxChars,
-    maxLines: CARD.titleMaxLines
+    fontFamily: SVG_FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: 700,
+    maxLines: CARD.titleMaxLines,
+    maxWidth: CARD.width - CARD.paddingX * 2
   });
   const bodyLines = wrapSvgText(node.body || "No body text.", {
-    maxCharsPerLine: CARD.bodyMaxChars,
-    maxLines: CARD.bodyMaxLines
+    fontFamily: SVG_FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: 400,
+    maxLines: CARD.bodyMaxLines,
+    maxWidth: CARD.width - CARD.paddingX * 2
   });
 
   const headerY = CARD.textTop;
@@ -424,34 +499,39 @@ const renderTextBlock = (
         `<tspan x="${x}" dy="${index === 0 ? 0 : lineHeight}">${escapeHtml(line)}</tspan>`
     )
     .join("");
-  return `      <text x="${x}" y="${y}" font-family="Avenir Next, Segoe UI, sans-serif" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}"${attributes}>${tspans}</text>`;
+  return `      <text x="${x}" y="${y}" font-family="${SVG_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}"${attributes}>${tspans}</text>`;
 };
 
-const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {
+export const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {
   const raw = text.replace(/\s+/g, " ").trim();
   if (!raw) {
     return [""];
   }
 
-  const words = raw.split(" ");
+  const tokens = tokenizeSvgText(raw);
   const lines: string[] = [];
   let current = "";
 
-  for (const word of words) {
-    const parts = breakLongWord(word, options.maxCharsPerLine);
+  for (const token of tokens) {
+    const parts = token === " " ? [token] : breakLongToken(token, options);
     for (const part of parts) {
-      const next = current ? `${current} ${part}` : part;
-      if (!current || next.length <= options.maxCharsPerLine) {
-        current = next;
+      if (part === " " && (!current || current.endsWith(" "))) {
         continue;
       }
-      lines.push(current);
-      current = part;
+
+      const candidate = current ? `${current}${part}` : part;
+      if (!current || measureSvgTextWidth(candidate, options) <= options.maxWidth) {
+        current = candidate;
+        continue;
+      }
+
+      lines.push(current.trimEnd());
+      current = part === " " ? "" : part.trimStart();
     }
   }
 
   if (current) {
-    lines.push(current);
+    lines.push(current.trimEnd());
   }
 
   if (lines.length <= options.maxLines) {
@@ -460,30 +540,111 @@ const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {
 
   const visible = lines.slice(0, options.maxLines);
   const lastVisibleLine = visible[options.maxLines - 1] ?? "";
-  visible[options.maxLines - 1] = clampLine(
+  visible[options.maxLines - 1] = clampLineWithEllipsis(
     lastVisibleLine,
-    options.maxCharsPerLine
+    options
   );
   return visible;
 };
 
-const breakLongWord = (word: string, maxCharsPerLine: number): string[] => {
-  if (word.length <= maxCharsPerLine) {
-    return [word];
+const tokenizeSvgText = (text: string): string[] => {
+  const tokens: string[] = [];
+  let narrowToken = "";
+
+  for (const char of Array.from(text)) {
+    if (char === " ") {
+      if (narrowToken) {
+        tokens.push(narrowToken);
+        narrowToken = "";
+      }
+      tokens.push(char);
+      continue;
+    }
+
+    if (isWideCharacter(char)) {
+      if (narrowToken) {
+        tokens.push(narrowToken);
+        narrowToken = "";
+      }
+      tokens.push(char);
+      continue;
+    }
+
+    narrowToken += char;
+  }
+
+  if (narrowToken) {
+    tokens.push(narrowToken);
+  }
+
+  return tokens;
+};
+
+const breakLongToken = (token: string, options: WrapTextOptions): string[] => {
+  if (measureSvgTextWidth(token, options) <= options.maxWidth) {
+    return [token];
   }
 
   const parts: string[] = [];
-  for (let index = 0; index < word.length; index += maxCharsPerLine) {
-    parts.push(word.slice(index, index + maxCharsPerLine));
+  let current = "";
+
+  for (const char of Array.from(token)) {
+    const candidate = `${current}${char}`;
+    if (current && measureSvgTextWidth(candidate, options) > options.maxWidth) {
+      parts.push(current);
+      current = char;
+      continue;
+    }
+
+    current = candidate;
   }
+
+  if (current) {
+    parts.push(current);
+  }
+
   return parts;
 };
 
-const clampLine = (line: string, maxCharsPerLine: number): string => {
-  if (line.length <= maxCharsPerLine) {
-    return line;
+const clampLineWithEllipsis = (line: string, options: WrapTextOptions): string => {
+  if (options.maxWidth <= 0) {
+    return ELLIPSIS;
   }
-  return `${line.slice(0, Math.max(1, maxCharsPerLine - 1))}…`;
+
+  let clamped = line.trimEnd();
+  const ellipsisWidth = measureSvgTextWidth(ELLIPSIS, options);
+  while (clamped && measureSvgTextWidth(clamped, options) + ellipsisWidth > options.maxWidth) {
+    clamped = Array.from(clamped).slice(0, -1).join("");
+  }
+
+  return clamped ? `${clamped}${ELLIPSIS}` : ELLIPSIS;
+};
+
+export const measureSvgTextWidth = (
+  text: string,
+  options: Pick<WrapTextOptions, "fontFamily" | "fontSize" | "fontWeight">
+): number => {
+  const cacheKey = `${options.fontFamily}|${options.fontSize}|${options.fontWeight}|${text}`;
+  const cached = TEXT_WIDTH_CACHE.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  TEXT_MEASURE_CONTEXT.font = `${options.fontWeight} ${options.fontSize}px ${options.fontFamily}`;
+  const width = TEXT_MEASURE_CONTEXT.measureText(text).width;
+  TEXT_WIDTH_CACHE.set(cacheKey, width);
+  return width;
+};
+
+const isWideCharacter = (char: string): boolean => {
+  const codePoint = char.codePointAt(0);
+  if (codePoint === undefined) {
+    return false;
+  }
+
+  return WIDE_CHAR_RANGES.some(
+    ([start, end]) => codePoint >= start && codePoint <= end
+  );
 };
 
 const collectEdgeRoutePoints = (

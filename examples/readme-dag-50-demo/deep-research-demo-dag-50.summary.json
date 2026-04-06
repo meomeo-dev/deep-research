@@ -13,13 +13,13 @@
       "ok": true,
       "branch": {
         "branchState": "active",
-        "createdAt": "2026-04-06T03:04:40.887Z",
+        "createdAt": "2026-04-06T13:43:57.996Z",
         "forkedFromVersionId": null,
-        "headVersionId": "version_6ee5d873a09d4605ab708823bc0f5694",
-        "id": "branch_f91439507b3e4951b41a1b1afeaaa0ff",
+        "headVersionId": "version_c4ae805d21dc408990c6fa3e93f23314",
+        "id": "branch_d3600e12d1714530a22f40716dcc3fa1",
         "name": "main",
         "parentBranchId": null,
-        "researchId": "research_033cb3c4656f488dbc9347dfa66d3fa6"
+        "researchId": "research_232d0861e05b4acc90ea94a4e90eb1c7"
       },
       "evidenceLinks": 0,
       "nodes": 50,
@@ -53,8 +53,8 @@
     }
   ],
   "pngExport": {
-    "fileSize": 1789418,
-    "height": 6092,
+    "fileSize": 3934018,
+    "height": 6071,
     "maxBytes": 10485760,
     "pngPath": "/Users/luojin/Downloads/meomeo_workspace/deep-research-skill/docs/assets/readme/deep-research-demo-dag-50.png",
     "scale": 1.45,
