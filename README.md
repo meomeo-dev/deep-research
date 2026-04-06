@@ -1,5 +1,7 @@
 # Deep Research Skill
 
+Current package version: `0.1.0`.
+
 TypeScript CLI repository for running deep research as structured state instead of loose notes. It bundles three things: the `deep-research` command, the skill entrypoint in `SKILL.md`, and the reference manuals under `resources/references/`.
 
 This README is the developer homepage. If you need the usage contract, decision boundary, or full CLI surface, read `SKILL.md` instead of expecting this file to pretend it is the whole manual.
@@ -38,6 +40,10 @@ Install the local CLI command:
 ```bash
 pnpm run install:cli
 ```
+
+Package: `deep-research-skill@0.1.0`.
+
+Repository: `https://github.com/meomeo-dev/deep-research.git`.
 
 That script installs dependencies, builds the project, and runs `npm link`, which exposes `deep-research` as a local command.
 

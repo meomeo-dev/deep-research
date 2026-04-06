@@ -1,6 +1,10 @@
 {
   "name": "deep-research-skill",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meomeo-dev/deep-research.git"
+  },
   "license": "MIT",
   "private": true,
   "type": "module",
