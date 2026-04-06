@@ -1,0 +1,44 @@
+suite:
+  id: 20260404_research_skill_project_run_manual_e2e
+  title: deep-research-skill manual e2e scenarios
+  canonical_spec: ../../docs/20260404_research_skill_project_run-manual-e2e.Spec.yaml
+  notes:
+    - This file is the discoverable E2E entrypoint under tests/e2e.
+    - The canonical detailed spec remains in docs for auditability.
+    - The canonical command surface is snake_case-only.
+
+scenarios:
+  - id: S01_bootstrap_graph_flow
+    title: Bootstrap a research and validate local DAG workflow
+    goal: Verify init, status, node CRUD, graph linking, snapshot creation, and version listing.
+    commands:
+      - init
+      - status
+      - node_add
+      - graph_link
+      - graph_check
+      - graph_snapshot
+      - version_list
+
+  - id: S02_web_evidence_flow
+    title: Use real web evidence and verify evidence workflow
+    goal: Verify evidence add, show, verify, link, artifact export, and history search with official sources.
+    commands:
+      - evidence_add
+      - evidence_show
+      - evidence_verify
+      - evidence_link
+      - artifact_add
+      - artifact_export
+      - research_search
+
+  - id: S03_branching_and_diff_flow
+    title: Fork a branch, change a node, and inspect lineage and diff
+    goal: Verify branch create, branch switch, nested branching, branch diff, and graph export.
+    commands:
+      - branch_create
+      - branch_switch
+      - node_update
+      - branch_list
+      - branch_diff
+      - graph_export

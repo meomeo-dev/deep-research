@@ -1,0 +1,67 @@
+{
+  "edgeCount": 88,
+  "graphCheck": {
+    "command": "graph_check",
+    "context": {
+      "edges": 88,
+      "evidenceLinks": 0,
+      "nodes": 50,
+      "ok": true,
+      "resultType": "record"
+    },
+    "data": {
+      "ok": true,
+      "branch": {
+        "branchState": "active",
+        "createdAt": "2026-04-06T03:04:40.887Z",
+        "forkedFromVersionId": null,
+        "headVersionId": "version_6ee5d873a09d4605ab708823bc0f5694",
+        "id": "branch_f91439507b3e4951b41a1b1afeaaa0ff",
+        "name": "main",
+        "parentBranchId": null,
+        "researchId": "research_033cb3c4656f488dbc9347dfa66d3fa6"
+      },
+      "evidenceLinks": 0,
+      "nodes": 50,
+      "edges": 88
+    },
+    "ok": true,
+    "summary": "graph_check confirmed ok=true with 50 node(s) and 88 edge(s)."
+  },
+  "htmlPath": "/Users/luojin/Downloads/meomeo_workspace/deep-research-skill/examples/readme-dag-50-demo/deep-research-demo-dag-50.html",
+  "nodeCount": 50,
+  "phaseSizes": [
+    {
+      "name": "phase-1-formulation",
+      "nodeCount": 13,
+      "edgeCount": 16
+    },
+    {
+      "name": "phase-2-design",
+      "nodeCount": 12,
+      "edgeCount": 23
+    },
+    {
+      "name": "phase-3-execution",
+      "nodeCount": 13,
+      "edgeCount": 24
+    },
+    {
+      "name": "phase-4-synthesis",
+      "nodeCount": 12,
+      "edgeCount": 25
+    }
+  ],
+  "pngExport": {
+    "fileSize": 1789418,
+    "height": 6092,
+    "maxBytes": 10485760,
+    "pngPath": "/Users/luojin/Downloads/meomeo_workspace/deep-research-skill/docs/assets/readme/deep-research-demo-dag-50.png",
+    "scale": 1.45,
+    "width": 7708,
+    "exportFormat": "png"
+  },
+  "projectRoot": "/Users/luojin/Downloads/meomeo_workspace/deep-research-skill/examples/readme-dag-50-demo/project",
+  "researchQuestion": "When does multi-step prompting materially improve code generation reliability enough to justify its extra token cost?",
+  "title": "Structured research demo: multi-step prompting for code generation"
+}

@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DAG Visualizer - __GRAPH_TITLE__</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f1e8;
+        --panel: rgba(255, 252, 247, 0.92);
+        --ink: #1e293b;
+        --muted: #6b7280;
+        --accent: #0f766e;
+        --accent-2: #b45309;
+        --line: #d6d3d1;
+        --shadow: 0 20px 60px rgba(15, 23, 42, 0.16);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
+          radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 32%),
+          linear-gradient(180deg, #f8f5ee 0%, var(--bg) 100%);
+      }
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) 1fr;
+      }
+      .sidebar {
+        padding: 24px;
+        border-right: 1px solid rgba(30, 41, 59, 0.08);
+        background: rgba(255, 255, 255, 0.45);
+        backdrop-filter: blur(16px);
+      }
+      .sidebar h1 {
+        margin: 0 0 8px;
+        font-size: 1.4rem;
+      }
+      .sidebar p,
+      .meta,
+      .detail p,
+      .legend {
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 16px 0 24px;
+      }
+      .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.12);
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 600;
+      }
+      .detail {
+        margin-top: 24px;
+        padding: 16px;
+        border: 1px solid rgba(30, 41, 59, 0.08);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+      }
+      .detail h2 {
+        margin: 0 0 6px;
+        font-size: 1.05rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .detail-copy {
+        margin: 0;
+      }
+      .detail pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        font-size: 0.9rem;
+        color: var(--ink);
+        max-height: 34vh;
+        overflow: auto;
+        padding: 12px;
+        border-radius: 14px;
+        background: rgba(248, 250, 252, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+      }
+      .canvas-shell {
+        position: relative;
+        overflow: hidden;
+      }
+      .toolbar {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 2;
+        display: flex;
+        gap: 8px;
+      }
+      .toolbar button {
+        border: none;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: var(--shadow);
+        color: var(--ink);
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .toolbar button:hover {
+        background: white;
+      }
+      svg {
+        width: 100%;
+        height: 100vh;
+        display: block;
+        cursor: grab;
+      }
+      .edge {
+        fill: none;
+        stroke: rgba(100, 116, 139, 0.5);
+        stroke-width: 2.5;
+      }
+      .edge.active {
+        stroke: var(--accent-2);
+        stroke-width: 3.4;
+      }
+      .node-card {
+        filter: drop-shadow(0 10px 24px rgba(15, 23, 42, 0.12));
+        cursor: pointer;
+        transition: opacity 140ms ease;
+      }
+      .node-card.active .node-bg {
+        fill: rgba(255, 251, 235, 0.98);
+        stroke: var(--accent-2);
+        stroke-width: 3;
+      }
+      .node-bg {
+        fill: rgba(255, 255, 255, 0.92);
+        stroke: rgba(15, 23, 42, 0.08);
+        stroke-width: 1.5;
+        transition: fill 140ms ease, stroke 140ms ease, stroke-width 140ms ease;
+      }
+      .node-card.kind-question .kind-bar { fill: #0f766e; }
+      .node-card.kind-hypothesis .kind-bar { fill: #2563eb; }
+      .node-card.kind-task .kind-bar { fill: #b45309; }
+      .node-card.kind-finding .kind-bar { fill: #7c3aed; }
+      .node-card.kind-conclusion .kind-bar { fill: #be123c; }
+      .node-card.kind-evidence .kind-bar { fill: #0369a1; }
+      .node-card.kind-gap .kind-bar { fill: #dc2626; }
+      .node-card.kind-note .kind-bar { fill: #4b5563; }
+      .node-title {
+        font-size: 14px;
+        font-weight: 700;
+        fill: var(--ink);
+      }
+      .node-sub {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        fill: var(--muted);
+        text-transform: uppercase;
+      }
+      .node-body {
+        font-size: 12px;
+        fill: #334155;
+      }
+      .node-divider {
+        stroke: rgba(148, 163, 184, 0.42);
+        stroke-width: 1;
+      }
+      .legend {
+        margin-top: 18px;
+        font-size: 0.86rem;
+      }
+      @media (max-width: 980px) {
+        .app { grid-template-columns: 1fr; }
+        .sidebar { border-right: none; border-bottom: 1px solid rgba(30, 41, 59, 0.08); }
+        svg { height: 72vh; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="meta">Local SPA graph viewer</div>
+        <h1>DAG Visualizer</h1>
+        <p>Interactive branch view for <strong>__BRANCH_NAME__</strong>. Click a node to inspect details, evidence links, drag the canvas to pan, and use the zoom controls to inspect structure.</p>
+        <div class="pill-row">
+          <span class="pill">Branch: __BRANCH_NAME__</span>
+          <span class="pill">Nodes: __NODE_COUNT__</span>
+          <span class="pill">Edges: __EDGE_COUNT__</span>
+        </div>
+        <div class="legend">Kinds are color-coded. Selected nodes highlight connected edges and reveal linked evidence so a human or stateless LLM operator can follow local causal structure quickly.</div>
+        <section class="detail" id="detail-panel">
+          <h2 id="detail-title">Graph Overview</h2>
+          <p class="detail-copy" id="detail-copy">Select a node to inspect its kind, workflow state, epistemic state, body text, and linked evidence.</p>
+          <pre id="detail-json">No node selected.</pre>
+        </section>
+      </aside>
+      <main class="canvas-shell">
+        <div class="toolbar">
+          <button id="zoom-out" type="button">-</button>
+          <button id="zoom-reset" type="button">Reset</button>
+          <button id="zoom-in" type="button">+</button>
+        </div>
+        <svg id="graph-svg" viewBox="0 0 __VIEWBOX_WIDTH__ __VIEWBOX_HEIGHT__" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(100, 116, 139, 0.6)" />
+            </marker>
+          </defs>
+          <g id="viewport"></g>
+        </svg>
+      </main>
+    </div>
+    <script id="graph-payload" type="application/json">__PAYLOAD_JSON__</script>
+    <script>
+      const payload = JSON.parse(document.getElementById("graph-payload").textContent);
+      const svg = document.getElementById("graph-svg");
+      const viewport = document.getElementById("viewport");
+      const detailTitle = document.getElementById("detail-title");
+      const detailCopy = document.getElementById("detail-copy");
+      const detailJson = document.getElementById("detail-json");
+      const state = { scale: 1, tx: 0, ty: 0, selectedNodeId: null, dragging: false, originX: 0, originY: 0 };
+      const CARD = {
+        bodyLineHeight: 16,
+        bodyMaxLines: 5,
+        footerGap: 20,
+        minHeight: 156,
+        metaLineHeight: 14,
+        metaMaxLines: 1,
+        paddingX: 16,
+        sectionGap: 18,
+        textTop: 30,
+        textWidth: 184,
+        titleLineHeight: 20,
+        titleMaxLines: 2,
+        width: 216
+      };
+      const measureContext = document.createElement("canvas").getContext("2d");
+
+      const setMeasureFont = (font) => {
+        if (measureContext) {
+          measureContext.font = font;
+        }
+      };
+
+      const measureTextWidth = (text) => {
+        if (!measureContext) {
+          return text.length * 7;
+        }
+        return measureContext.measureText(text).width;
+      };
+
+      const breakLongWord = (word, maxWidth) => {
+        const chunks = [];
+        let current = "";
+        for (const char of word) {
+          const next = current + char;
+          if (current && measureTextWidth(next) > maxWidth) {
+            chunks.push(current);
+            current = char;
+          } else {
+            current = next;
+          }
+        }
+        if (current) {
+          chunks.push(current);
+        }
+        return chunks;
+      };
+
+      const clampLine = (line, maxWidth) => {
+        if (measureTextWidth(line) <= maxWidth) {
+          return line;
+        }
+        let result = line;
+        while (result.length > 1 && measureTextWidth(result + "…") > maxWidth) {
+          result = result.slice(0, -1);
+        }
+        return result + "…";
+      };
+
+      const wrapTextToLines = (text, options) => {
+        const raw = (text || "").replace(/\s+/g, " ").trim();
+        if (!raw) {
+          return [""];
+        }
+
+        setMeasureFont(options.font);
+        const words = raw.split(" ").flatMap((word) => {
+          if (measureTextWidth(word) <= options.maxWidth) {
+            return [word];
+          }
+          return breakLongWord(word, options.maxWidth);
+        });
+
+        const lines = [];
+        let current = "";
+
+        words.forEach((word) => {
+          const candidate = current ? current + " " + word : word;
+          if (!current || measureTextWidth(candidate) <= options.maxWidth) {
+            current = candidate;
+            return;
+          }
+          lines.push(current);
+          current = word;
+        });
+
+        if (current) {
+          lines.push(current);
+        }
+
+        if (lines.length <= options.maxLines) {
+          return lines;
+        }
+
+        const visible = lines.slice(0, options.maxLines);
+        visible[options.maxLines - 1] = clampLine(visible[options.maxLines - 1], options.maxWidth);
+        return visible;
+      };
+
+      const appendTextBlock = (group, options) => {
+        const textNode = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        textNode.setAttribute("class", options.className);
+        textNode.setAttribute("x", String(options.x));
+        textNode.setAttribute("y", String(options.y));
+        if (options.clipPathId) {
+          textNode.setAttribute("clip-path", "url(#" + options.clipPathId + ")");
+        }
+
+        const lines = options.lines || wrapTextToLines(options.text, {
+          font: options.font,
+          maxLines: options.maxLines,
+          maxWidth: options.maxWidth
+        });
+
+        lines.forEach((line, index) => {
+          const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+          tspan.setAttribute("x", String(options.x));
+          tspan.setAttribute("dy", index === 0 ? "0" : String(options.lineHeight));
+          tspan.textContent = line;
+          textNode.appendChild(tspan);
+        });
+
+        group.appendChild(textNode);
+      };
+
+      const buildNodeCardLayout = (node) => {
+        const headerText = node.kind + " · " + node.workflowState + " · " + node.epistemicState;
+        const headerLines = wrapTextToLines(headerText, {
+          font: '500 11px "Avenir Next", "Segoe UI", sans-serif',
+          maxLines: CARD.metaMaxLines,
+          maxWidth: CARD.textWidth
+        });
+        const titleLines = wrapTextToLines(node.title, {
+          font: '700 14px "Avenir Next", "Segoe UI", sans-serif',
+          maxLines: CARD.titleMaxLines,
+          maxWidth: CARD.textWidth
+        });
+        const bodyLines = wrapTextToLines(node.body || "No body text.", {
+          font: '400 12px "Avenir Next", "Segoe UI", sans-serif',
+          maxLines: CARD.bodyMaxLines,
+          maxWidth: CARD.textWidth
+        });
+        const headerY = CARD.textTop;
+        const titleY = headerY + Math.max(1, headerLines.length - 1) * CARD.metaLineHeight + CARD.sectionGap + 2;
+        const bodyY = titleY + Math.max(1, titleLines.length - 1) * CARD.titleLineHeight + CARD.sectionGap + 2;
+        const dividerY = bodyY + Math.max(1, bodyLines.length - 1) * CARD.bodyLineHeight + CARD.footerGap;
+        const footerY = dividerY + CARD.footerGap;
+        const height = Math.max(node.cardHeight || CARD.minHeight, CARD.minHeight, footerY + 16);
+
+        return {
+          bodyLines,
+          bodyY,
+          dividerY,
+          footerText: "in " + node.incoming + " · out " + node.outgoing + " · evidence " + (node.evidence ? node.evidence.length : 0),
+          footerY,
+          headerLines,
+          headerY,
+          height,
+          titleLines,
+          titleY
+        };
+      };
+
+      const formatDetail = (node) => {
+        const evidenceLines = node.evidence && node.evidence.length > 0
+          ? node.evidence.flatMap((item) => [
+              "- [" + item.relation + "] trust=" + item.trustLevel + " | " + item.title + (item.verifiedAt ? " | verified" : " | unverified")
+            ])
+          : ["- No evidence linked."];
+        const lines = [
+          "Kind: " + node.kind,
+          "Workflow: " + node.workflowState,
+          "Epistemic: " + node.epistemicState,
+          "Incoming: " + node.incoming,
+          "Outgoing: " + node.outgoing,
+          "Evidence Links: " + (node.evidence ? node.evidence.length : 0),
+          "",
+          "Body:",
+          node.body && node.body.trim() ? node.body : "No body text.",
+          "",
+          "Evidence:",
+          ...evidenceLines
+        ];
+        return lines.join("\n");
+      };
+
+      const setDetailPanel = (node) => {
+        if (!node) {
+          detailTitle.textContent = "Graph Overview";
+          detailTitle.setAttribute("title", "Graph Overview");
+          detailCopy.textContent = "Select a node to inspect its kind, workflow state, epistemic state, body text, and linked evidence.";
+          detailJson.textContent = "No node selected.";
+          return;
+        }
+
+        detailTitle.textContent = node.title;
+        detailTitle.setAttribute("title", node.title);
+        detailCopy.textContent = node.kind + " node on branch " + payload.branch.name + " with " + (node.evidence ? node.evidence.length : 0) + " linked evidence item(s).";
+        detailJson.textContent = formatDetail(node);
+      };
+
+      const applyTransform = () => {
+        viewport.setAttribute("transform", "translate(" + state.tx + " " + state.ty + ") scale(" + state.scale + ")");
+      };
+
+      const connectedNodeIds = (nodeId) => {
+        const ids = new Set([nodeId]);
+        payload.edges.forEach((edge) => {
+          if (edge.fromNodeId === nodeId || edge.toNodeId === nodeId) {
+            ids.add(edge.fromNodeId);
+            ids.add(edge.toNodeId);
+          }
+        });
+        return ids;
+      };
+
+      const render = () => {
+        viewport.innerHTML = "";
+        const activeIds = state.selectedNodeId ? connectedNodeIds(state.selectedNodeId) : null;
+
+        payload.edges.forEach((edge) => {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", edge.svgPath || "");
+          path.setAttribute("class", "edge" + (state.selectedNodeId && (edge.fromNodeId === state.selectedNodeId || edge.toNodeId === state.selectedNodeId) ? " active" : ""));
+          path.setAttribute("marker-end", "url(#arrow)");
+          viewport.appendChild(path);
+        });
+
+        payload.nodes.forEach((node) => {
+          const card = buildNodeCardLayout(node);
+          const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          const active = state.selectedNodeId === node.id;
+          const faded = activeIds && !activeIds.has(node.id) ? 0.28 : 1;
+          const clipPathId = "node-text-clip-" + node.id.replace(/[^a-zA-Z0-9_-]/g, "-");
+          group.setAttribute("class", "node-card kind-" + node.kind + (active ? " active" : ""));
+          group.setAttribute("transform", "translate(" + node.x + " " + node.y + ")");
+          group.setAttribute("opacity", String(faded));
+
+          const clipPath = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
+          clipPath.setAttribute("id", clipPathId);
+          const clipRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          clipRect.setAttribute("x", String(CARD.paddingX - 2));
+          clipRect.setAttribute("y", "16");
+          clipRect.setAttribute("width", String(CARD.textWidth + 4));
+          clipRect.setAttribute("height", String(Math.max(84, card.height - 24)));
+          clipPath.appendChild(clipRect);
+          group.appendChild(clipPath);
+
+          const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          background.setAttribute("class", "node-bg");
+          background.setAttribute("rx", "22");
+          background.setAttribute("width", String(CARD.width));
+          background.setAttribute("height", String(card.height));
+          group.appendChild(background);
+
+          const kindBar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          kindBar.setAttribute("class", "kind-bar");
+          kindBar.setAttribute("rx", "22");
+          kindBar.setAttribute("width", String(CARD.width));
+          kindBar.setAttribute("height", "8");
+          group.appendChild(kindBar);
+
+          appendTextBlock(group, {
+            className: "node-sub",
+            clipPathId,
+            font: '400 11px "Avenir Next", "Segoe UI", sans-serif',
+            lineHeight: CARD.metaLineHeight,
+            lines: card.headerLines,
+            maxLines: card.headerLines.length,
+            maxWidth: CARD.textWidth,
+            text: "",
+            x: CARD.paddingX,
+            y: card.headerY
+          });
+
+          appendTextBlock(group, {
+            className: "node-title",
+            clipPathId,
+            font: '700 14px "Avenir Next", "Segoe UI", sans-serif',
+            lineHeight: CARD.titleLineHeight,
+            lines: card.titleLines,
+            maxLines: card.titleLines.length,
+            maxWidth: CARD.textWidth,
+            text: "",
+            x: CARD.paddingX,
+            y: card.titleY
+          });
+
+          appendTextBlock(group, {
+            className: "node-body",
+            clipPathId,
+            font: '400 12px "Avenir Next", "Segoe UI", sans-serif',
+            lineHeight: CARD.bodyLineHeight,
+            lines: card.bodyLines,
+            maxLines: card.bodyLines.length,
+            maxWidth: CARD.textWidth,
+            text: "",
+            x: CARD.paddingX,
+            y: card.bodyY
+          });
+
+          const divider = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          divider.setAttribute("class", "node-divider");
+          divider.setAttribute("x1", String(CARD.paddingX));
+          divider.setAttribute("x2", String(CARD.width - CARD.paddingX));
+          divider.setAttribute("y1", String(card.dividerY));
+          divider.setAttribute("y2", String(card.dividerY));
+          group.appendChild(divider);
+
+          appendTextBlock(group, {
+            className: "node-sub",
+            clipPathId,
+            font: '600 11px "Avenir Next", "Segoe UI", sans-serif',
+            lineHeight: CARD.metaLineHeight,
+            maxLines: 1,
+            maxWidth: CARD.textWidth,
+            text: card.footerText,
+            x: CARD.paddingX,
+            y: card.footerY
+          });
+
+          group.addEventListener("click", (event) => {
+            event.stopPropagation();
+            state.selectedNodeId = node.id;
+            setDetailPanel(node);
+            render();
+          });
+
+          viewport.appendChild(group);
+        });
+      };
+
+      document.getElementById("zoom-in").addEventListener("click", () => {
+        state.scale = Math.min(2.6, state.scale + 0.12);
+        applyTransform();
+      });
+      document.getElementById("zoom-out").addEventListener("click", () => {
+        state.scale = Math.max(0.45, state.scale - 0.12);
+        applyTransform();
+      });
+      document.getElementById("zoom-reset").addEventListener("click", () => {
+        state.scale = 1;
+        state.tx = 0;
+        state.ty = 0;
+        applyTransform();
+      });
+
+      svg.addEventListener("mousedown", (event) => {
+        state.dragging = true;
+        state.originX = event.clientX - state.tx;
+        state.originY = event.clientY - state.ty;
+        svg.style.cursor = "grabbing";
+      });
+      window.addEventListener("mouseup", () => {
+        state.dragging = false;
+        svg.style.cursor = "grab";
+      });
+      window.addEventListener("mousemove", (event) => {
+        if (!state.dragging) {
+          return;
+        }
+        state.tx = event.clientX - state.originX;
+        state.ty = event.clientY - state.originY;
+        applyTransform();
+      });
+      svg.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const delta = event.deltaY < 0 ? 0.08 : -0.08;
+        state.scale = Math.max(0.45, Math.min(2.6, state.scale + delta));
+        applyTransform();
+      }, { passive: false });
+      svg.addEventListener("click", () => {
+        state.selectedNodeId = null;
+        setDetailPanel(null);
+        render();
+      });
+
+      setDetailPanel(null);
+      applyTransform();
+      render();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "name": "deep-research-skill",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "deep-research": "./dist/cli/main.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "cli": "tsx src/cli/main.ts",
+    "cli:help": "tsx src/cli/main.ts -h",
+    "dev": "tsx src/cli/main.ts",
+    "build": "tsup src/index.ts src/cli/main.ts --format esm --dts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:release-surface",
+    "test": "vitest run",
+    "test:release-surface": "pnpm build && vitest run tests/integration/dist-cli-smoke.test.ts",
+    "test:watch": "vitest",
+    "db:migrate": "tsx src/cli/main.ts db_migrate",
+    "install:cli": "pnpm install && pnpm build && npm link",
+    "relink:cli": "pnpm build && npm link"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.0.0",
+    "commander": "^14.0.0",
+    "elkjs": "^0.11.1",
+    "esbuild": "^0.28.0",
+    "skia-canvas": "^3.0.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
+    "eslint": "^9.34.0",
+    "globals": "^16.4.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "skia-canvas"
+    ]
+  }
+}
