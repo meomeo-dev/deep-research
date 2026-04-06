@@ -1,6 +1,6 @@
 {
   "name": "deep-research-skill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/meomeo-dev/deep-research.git"
@@ -24,11 +24,13 @@
     "lint": "eslint .",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:release-surface",
     "test": "vitest run",
+    "test:clean-install-release-surface": "node scripts/verify-clean-install-release-surface.mjs",
     "test:release-surface": "pnpm build && vitest run tests/integration/dist-cli-smoke.test.ts",
     "test:watch": "vitest",
     "db:migrate": "tsx src/cli/main.ts db_migrate",
     "install:cli": "pnpm install && pnpm build && npm link",
-    "relink:cli": "pnpm build && npm link"
+    "relink:cli": "pnpm build && npm link",
+    "release:verify": "pnpm run check && pnpm run test:clean-install-release-surface"
   },
   "dependencies": {
     "better-sqlite3": "^12.0.0",
@@ -52,6 +54,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
       "skia-canvas"
     ]
   }

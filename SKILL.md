@@ -124,7 +124,7 @@ pnpm run install:cli
 ```
 
 - `pnpm run install:cli` 会执行依赖安装、构建（build）和 `npm link`，把当前仓库产物注册成可直接调用的 `deep-research` 命令。
-- 当前源码包版本是 `deep-research-skill@0.1.0`。
+- 当前源码包版本是 `deep-research-skill@0.1.1`。
 - 当前仓库地址是 `https://github.com/meomeo-dev/deep-research.git`。
 - 仅在源码或发布来源（provenance）已知且可审查时执行安装脚本；若来源不明，先审查 `package.json` / `Makefile` 中的相关脚本，再决定是否安装。
 - 如果你改过源码后要刷新本地命令面（CLI surface），用 `pnpm run relink:cli`。

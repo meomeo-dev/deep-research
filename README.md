@@ -1,6 +1,6 @@
 # Deep Research Skill
 
-Current package version: `0.1.0`.
+Current package version: `0.1.1`.
 
 TypeScript CLI repository for running deep research as structured state instead of loose notes. It bundles three things: the `deep-research` command, the skill entrypoint in `SKILL.md`, and the reference manuals under `resources/references/`.
 
@@ -35,13 +35,19 @@ Run the main quality gate:
 pnpm run check
 ```
 
+Run the release gate from a clean install before shipping:
+
+```bash
+pnpm run release:verify
+```
+
 Install the local CLI command:
 
 ```bash
 pnpm run install:cli
 ```
 
-Package: `deep-research-skill@0.1.0`.
+Package: `deep-research-skill@0.1.1`.
 
 Repository: `https://github.com/meomeo-dev/deep-research.git`.
 
@@ -67,6 +73,12 @@ Run lint, typecheck, tests, and release-surface validation:
 pnpm run check
 ```
 
+Run the clean-install release verification. This copies the repository into a temporary directory, installs dependencies from scratch, and re-runs the dist CLI smoke test so native binding regressions are caught before release:
+
+```bash
+pnpm run test:clean-install-release-surface
+```
+
 Apply database migrations:
 
 ```bash
@@ -82,6 +94,7 @@ deep-research graph_export --project /path/to/project --export-format png --outp
 Current runtime note:
 
 - PNG export now uses skia-canvas as the default raster engine because this repository prioritizes export speed over minimum file size.
+- Native runtime dependencies are pinned in `pnpm.onlyBuiltDependencies`; if you add another dependency with install-time binaries, update that allowlist and re-run `pnpm run release:verify`.
 
 Rebuild and refresh the linked CLI after source changes:
 
