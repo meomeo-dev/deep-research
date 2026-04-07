@@ -42,7 +42,7 @@ describe("graph rendering layout bounds", () => {
   it("uses a CJK-capable font stack for mixed-language node text", () => {
     expect(GRAPH_FONT_FAMILY).toContain("PingFang SC");
     expect(GRAPH_FONT_FAMILY).toContain("Noto Sans CJK SC");
-    expect(GRAPH_FONT_FAMILY.indexOf("PingFang SC")).toBeLessThan(
+    expect(GRAPH_FONT_FAMILY.indexOf("Hiragino Sans GB")).toBeLessThan(
       GRAPH_FONT_FAMILY.indexOf("Avenir Next")
     );
 
@@ -56,6 +56,35 @@ describe("graph rendering layout bounds", () => {
 
     expect(titleLines[0]).toContain("OpenAI GPT");
     expect(titleLines.join("")).toContain("策略演化路径");
+  });
+
+  it("splits mixed-script SVG text into explicit font-family runs", async () => {
+    const nodes = [
+      {
+        body: "English mixed text 与 中文 body 一起出现。",
+        epistemicState: "untested" as const,
+        id: "node-mixed",
+        kind: "evidence" as const,
+        title: "Mixed Title / 混合标题",
+        workflowState: "draft" as const
+      }
+    ];
+
+    const { edges, layoutNodes, viewport } = await computeGraphLayout(nodes, [], {});
+    const svg = buildGraphSvgDocument({
+      branchName: "mixed-script-runs",
+      edges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).toContain("font-family=\"'Avenir Next'");
+    expect(svg).toContain("font-family=\"'Hiragino Sans GB'");
+    expect(svg).toContain("English mixed text");
+    expect(svg).toContain("与 中文");
+    expect(svg).toContain("body ");
+    expect(svg).toContain("一起出现");
   });
 
   it("wraps and truncates long CJK text within the card line budget", () => {

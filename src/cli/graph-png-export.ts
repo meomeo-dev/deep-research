@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GRAPH_FONT_FAMILY_NAMES,
   buildGraphSvgDocument,
   computeGraphLayout,
   defaultGraphPngOutputPath,
@@ -23,8 +24,27 @@ export interface GraphPngExportResult {
 }
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
+const GRAPH_FONT_PATHS_ENV = "DEEP_RESEARCH_GRAPH_FONT_PATHS";
 const MAX_DIMENSION = 8192;
 const MIN_SCALE = 0.45;
+const GRAPH_FONT_REGISTRATION_CANDIDATES: Record<string, readonly string[]> = {
+  "Apple Symbols": ["/System/Library/Fonts/Apple Symbols.ttf"],
+  "Arial Unicode MS": ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf"],
+  "Hiragino Sans GB": ["/System/Library/Fonts/Hiragino Sans GB.ttc"],
+  "Microsoft YaHei": ["C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyh.ttf"],
+  "Noto Sans CJK SC": [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"
+  ],
+  "PingFang SC": ["/System/Library/Fonts/PingFang.ttc"],
+  "Source Han Sans SC": [
+    "/usr/share/fonts/opentype/adobe-source-han-sans/SourceHanSansSC-Regular.otf",
+    "/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf"
+  ]
+};
+const GRAPH_PNG_FONT_FAMILIES = GRAPH_FONT_FAMILY_NAMES.filter((family) => family !== "sans-serif");
+const REGISTERED_GRAPH_FONT_FAMILIES = new Set<string>();
 
 export const exportGraphPng = async (
   input: GraphPngExportOptions
@@ -42,7 +62,9 @@ export const exportGraphPng = async (
   scale = fitScaleToMaxDimension(scale, viewport.width, viewport.height);
 
   const skiaCanvasModule = await import("skia-canvas");
-  const { Canvas, loadImage } = skiaCanvasModule;
+  const { Canvas, FontLibrary, loadImage } = skiaCanvasModule;
+
+  ensureGraphFontsRegistered(FontLibrary);
 
   let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
   let width = 0;
@@ -121,6 +143,54 @@ const renderGraphPngBuffer = async (
   const image = await loadImage(Buffer.from(svg, "utf8"));
   ctx.drawImage(image, 0, 0, width, height);
   return canvas.toBuffer("png") as Promise<Buffer<ArrayBufferLike>>;
+};
+
+const ensureGraphFontsRegistered = (
+  fontLibrary: typeof import("skia-canvas").FontLibrary
+): void => {
+  for (const family of GRAPH_PNG_FONT_FAMILIES) {
+    if (REGISTERED_GRAPH_FONT_FAMILIES.has(family) || fontLibrary.has(family)) {
+      REGISTERED_GRAPH_FONT_FAMILIES.add(family);
+      continue;
+    }
+
+    const fontPaths = findExistingGraphFontPaths(family);
+    if (fontPaths.length === 0) {
+      continue;
+    }
+
+    try {
+      fontLibrary.use(family, fontPaths);
+    } catch {
+      continue;
+    }
+
+    if (fontLibrary.has(family)) {
+      REGISTERED_GRAPH_FONT_FAMILIES.add(family);
+    }
+  }
+};
+
+const findExistingGraphFontPaths = (family: string): string[] => {
+  const configuredPaths = getConfiguredGraphFontPaths();
+  const candidatePaths = [
+    ...configuredPaths,
+    ...(GRAPH_FONT_REGISTRATION_CANDIDATES[family] ?? [])
+  ];
+
+  return [...new Set(candidatePaths)].filter((fontPath) => fs.existsSync(fontPath));
+};
+
+const getConfiguredGraphFontPaths = (): string[] => {
+  const rawValue = process.env[GRAPH_FONT_PATHS_ENV];
+  if (!rawValue) {
+    return [];
+  }
+
+  return rawValue
+    .split(path.delimiter)
+    .map((fontPath) => fontPath.trim())
+    .filter((fontPath) => fontPath.length > 0);
 };
 
 const suggestScale = (

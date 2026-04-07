@@ -98,18 +98,46 @@ const WIDE_CHAR_RANGES = [
 // Mixed Chinese/English titles can render as "???" in PNG export if Latin-first fonts win fallback.
 // Keep CJK-capable fonts ahead of Latin UI fonts so SVG text measurement and skia-canvas raster export
 // both pick glyphs that can render mixed-script node titles reliably across common macOS/Windows setups.
-export const GRAPH_FONT_FAMILY = [
-  "'PingFang SC'",
-  "'Hiragino Sans GB'",
-  "'Noto Sans CJK SC'",
-  "'Source Han Sans SC'",
-  "'Microsoft YaHei'",
-  "'Segoe UI'",
-  "'Avenir Next'",
-  "'Helvetica Neue'",
-  'Arial',
-  'sans-serif'
-].join(", ");
+export const GRAPH_FONT_FAMILY_NAMES = [
+  "Hiragino Sans GB",
+  "PingFang SC",
+  "Noto Sans CJK SC",
+  "Source Han Sans SC",
+  "Microsoft YaHei",
+  "Arial Unicode MS",
+  "Apple Symbols",
+  "Segoe UI",
+  "Avenir Next",
+  "Helvetica Neue",
+  "Arial",
+  "sans-serif"
+] as const;
+export const GRAPH_FONT_FAMILY = GRAPH_FONT_FAMILY_NAMES.map((name) =>
+  name.includes(" ") ? `'${name}'` : name
+).join(", ");
+const GRAPH_CJK_FONT_FAMILY = [
+  "Hiragino Sans GB",
+  "PingFang SC",
+  "Noto Sans CJK SC",
+  "Source Han Sans SC",
+  "Microsoft YaHei",
+  "Arial Unicode MS",
+  "Apple Symbols",
+  "sans-serif"
+]
+  .map((name) => (name.includes(" ") ? `'${name}'` : name))
+  .join(", ");
+const GRAPH_LATIN_FONT_FAMILY = [
+  "Avenir Next",
+  "Helvetica Neue",
+  "Segoe UI",
+  "Arial",
+  "Arial Unicode MS",
+  "Apple Symbols",
+  "sans-serif"
+]
+  .map((name) => (name.includes(" ") ? `'${name}'` : name))
+  .join(", ");
 const TEXT_MEASURE_CANVAS = new Canvas(1, 1);
 const TEXT_MEASURE_CONTEXT = TEXT_MEASURE_CANVAS.getContext("2d");
 const TEXT_WIDTH_CACHE = new Map<string, number>();
@@ -507,6 +535,21 @@ const renderTextBlock = (
   fontWeight: number,
   uppercase: boolean
 ): string => {
+  if (!uppercase) {
+    return lines
+      .map((line, index) =>
+        renderMixedScriptLine(line, {
+          fill,
+          fontSize,
+          fontWeight,
+          lineHeight,
+          x,
+          y: y + index * lineHeight
+        })
+      )
+      .join("\n");
+  }
+
   const attributes = uppercase ? ' text-transform="uppercase" letter-spacing="0.04em"' : "";
   const tspans = lines
     .map(
@@ -515,6 +558,81 @@ const renderTextBlock = (
     )
     .join("");
   return `      <text x="${x}" y="${y}" font-family="${GRAPH_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}"${attributes}>${tspans}</text>`;
+};
+
+const renderMixedScriptLine = (
+  line: string,
+  options: {
+    fill: string;
+    fontSize: number;
+    fontWeight: number;
+    lineHeight: number;
+    x: number;
+    y: number;
+  }
+): string => {
+  const segments = segmentTextByScript(line);
+  if (segments.length === 0) {
+    return `      <text x="${options.x}" y="${options.y}" font-family="${GRAPH_CJK_FONT_FAMILY}" font-size="${options.fontSize}" font-weight="${options.fontWeight}" fill="${options.fill}"></text>`;
+  }
+
+  let cursorX = options.x;
+  const tspans = segments
+    .map((segment) => {
+      const fontFamily = segment.script === "latin" ? GRAPH_LATIN_FONT_FAMILY : GRAPH_CJK_FONT_FAMILY;
+      const tspan = `        <tspan x="${formatSvgNumber(cursorX)}" y="${formatSvgNumber(options.y)}" font-family="${fontFamily}">${escapeHtml(segment.text)}</tspan>`;
+      cursorX += measureSvgTextWidth(segment.text, {
+        fontFamily,
+        fontSize: options.fontSize,
+        fontWeight: options.fontWeight
+      });
+      return tspan;
+    })
+    .join("\n");
+
+  return [
+    `      <text x="${options.x}" y="${options.y}" font-size="${options.fontSize}" font-weight="${options.fontWeight}" fill="${options.fill}">`,
+    tspans,
+    "      </text>"
+  ].join("\n");
+};
+
+const segmentTextByScript = (
+  text: string
+): Array<{ script: "cjk" | "latin"; text: string }> => {
+  const segments: Array<{ script: "cjk" | "latin"; text: string }> = [];
+
+  for (const char of Array.from(text)) {
+    const script = classifyTextScript(char, segments.at(-1)?.script);
+    const previous = segments.at(-1);
+    if (previous?.script === script) {
+      previous.text += char;
+      continue;
+    }
+
+    segments.push({ script, text: char });
+  }
+
+  return segments;
+};
+
+const classifyTextScript = (
+  char: string,
+  previousScript: "cjk" | "latin" | undefined
+): "cjk" | "latin" => {
+  if (isWideCharacter(char)) {
+    return "cjk";
+  }
+
+  if (/^[A-Za-z0-9]$/.test(char)) {
+    return "latin";
+  }
+
+  if (/^[\u0000-\u024f]$/.test(char)) {
+    return previousScript ?? "latin";
+  }
+
+  return previousScript ?? "cjk";
 };
 
 export const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {
