@@ -50,8 +50,10 @@ globalThis.console.error(`[release-verify] creating temp project copy at ${proje
 
 try {
   copyProject();
-  globalThis.console.error("[release-verify] running pnpm install --frozen-lockfile");
-  runStep(packageManager, ["install", "--frozen-lockfile"]);
+  globalThis.console.error("[release-verify] running pnpm install --frozen-lockfile --ignore-scripts=false");
+  runStep(packageManager, ["install", "--frozen-lockfile", "--ignore-scripts=false"]);
+  globalThis.console.error("[release-verify] running pnpm run native:prepare");
+  runStep(packageManager, ["run", "native:prepare"]);
   globalThis.console.error("[release-verify] running pnpm run test:release-surface");
   runStep(packageManager, ["run", "test:release-surface"]);
   globalThis.console.error("[release-verify] clean-install release surface passed");

@@ -1,6 +1,6 @@
 # Deep Research Skill
 
-Current package version: `0.1.1`.
+Current package version: `0.1.2`.
 
 TypeScript CLI repository for running deep research as structured state instead of loose notes. It bundles three things: the `deep-research` command, the skill entrypoint in `SKILL.md`, and the reference manuals under `resources/references/`.
 
@@ -20,11 +20,18 @@ Requirements:
 - Node.js 22 or newer.
 - pnpm.
 
-From source:
+Install the local CLI from source:
 
 ```bash
 cd /path/to/deep-research-skill
-pnpm install
+pnpm run install:cli
+```
+
+For development without linking the CLI globally:
+
+```bash
+cd /path/to/deep-research-skill
+pnpm run install:deps
 pnpm build
 pnpm dev -- --help
 ```
@@ -47,11 +54,11 @@ Install the local CLI command:
 pnpm run install:cli
 ```
 
-Package: `deep-research-skill@0.1.1`.
+Package: `deep-research-skill@0.1.2`.
 
 Repository: `https://github.com/meomeo-dev/deep-research.git`.
 
-That script installs dependencies, builds the project, and runs `npm link`, which exposes `deep-research` as a local command.
+That single command installs dependencies, explicitly rebuilds native dependencies, verifies that `better-sqlite3` and `esbuild` are loadable, builds the project, and runs `npm link`, which exposes `deep-research` as a local command.
 
 ## Common Tasks
 
@@ -65,6 +72,18 @@ Run tests:
 
 ```bash
 pnpm test
+```
+
+Run the full CLI subcommand e2e regression suite:
+
+```bash
+pnpm run test:e2e-cli
+```
+
+Explicitly rebuild and verify native dependencies:
+
+```bash
+pnpm run native:prepare
 ```
 
 Run lint, typecheck, tests, and release-surface validation:
@@ -94,7 +113,8 @@ deep-research graph_export --project /path/to/project --export-format png --outp
 Current runtime note:
 
 - PNG export now uses skia-canvas as the default raster engine because this repository prioritizes export speed over minimum file size.
-- Native runtime dependencies are pinned in `pnpm.onlyBuiltDependencies`; if you add another dependency with install-time binaries, update that allowlist and re-run `pnpm run release:verify`.
+- Native runtime dependencies are pinned in `pnpm.onlyBuiltDependencies`; if you add another dependency with install-time binaries, update that allowlist, extend `pnpm run native:prepare`, and re-run `pnpm run release:verify`.
+- If `pnpm install` logs `Ignored build scripts`, the supported recovery path is `pnpm run native:prepare`; it runs `pnpm rebuild better-sqlite3 esbuild`, then `npm rebuild better-sqlite3`, and finally probes the native modules directly. If your pnpm config forces `ignore-scripts=true`, clear that first.
 
 Rebuild and refresh the linked CLI after source changes:
 

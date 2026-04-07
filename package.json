@@ -1,6 +1,6 @@
 {
   "name": "deep-research-skill",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "type": "git",
     "url": "https://github.com/meomeo-dev/deep-research.git"
@@ -20,16 +20,21 @@
     "dev": "tsx src/cli/main.ts",
     "build": "tsup src/index.ts src/cli/main.ts --format esm --dts",
     "clean": "rm -rf dist",
+    "install:deps": "pnpm install --ignore-scripts=false && pnpm run native:prepare",
+    "native:rebuild": "node scripts/rebuild-native-deps.mjs",
+    "native:check": "node scripts/verify-native-bindings.mjs",
+    "native:prepare": "pnpm run native:rebuild && pnpm run native:check",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:release-surface",
+    "check": "pnpm run native:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:release-surface",
     "test": "vitest run",
+    "test:e2e-cli": "pnpm build && vitest run tests/e2e/cli-e2e-regression.test.ts",
     "test:clean-install-release-surface": "node scripts/verify-clean-install-release-surface.mjs",
     "test:release-surface": "pnpm build && vitest run tests/integration/dist-cli-smoke.test.ts",
     "test:watch": "vitest",
     "db:migrate": "tsx src/cli/main.ts db_migrate",
-    "install:cli": "pnpm install && pnpm build && npm link",
-    "relink:cli": "pnpm build && npm link",
+    "install:cli": "pnpm run install:deps && pnpm build && npm link",
+    "relink:cli": "pnpm run native:check && pnpm build && npm link",
     "release:verify": "pnpm run check && pnpm run test:clean-install-release-surface"
   },
   "dependencies": {
