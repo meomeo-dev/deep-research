@@ -7,13 +7,15 @@ export interface ProjectPaths {
   dataDir: string;
   dbPath: string;
   recentRefsPath: string;
+  sidecarManifestPath: string;
 }
 
 export const resolveProjectPaths = (projectRoot: string): ProjectPaths => ({
   projectRoot,
   dataDir: path.join(projectRoot, ".deep-research"),
   dbPath: path.join(projectRoot, ".deep-research", "deep-research.sqlite"),
-  recentRefsPath: path.join(projectRoot, ".deep-research", "recent-refs.json")
+  recentRefsPath: path.join(projectRoot, ".deep-research", "recent-refs.json"),
+  sidecarManifestPath: path.join(projectRoot, ".deep-research", "crawl4ai-sidecar.json")
 });
 
 export const ensureProjectDataDir = (paths: ProjectPaths): void => {

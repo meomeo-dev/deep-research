@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
@@ -30,9 +29,23 @@ const outputOptionsFor = (context: ReturnType<typeof createContext>) => ({
   paths: context.paths
 });
 
+const ensureReportGatesIfNeeded = (
+  context: ReturnType<typeof createContext>,
+  researchId?: string,
+  branchName?: string
+): void => {
+  if (context.options.format === "json") {
+    return;
+  }
+  context.service.ensureReportExecutionGates(researchId, branchName);
+};
+
 const HELP_TEXT = {
   artifactBody: "Full artifact body text to persist.",
   artifactKind: "Artifact kind, such as conclusion_summary or report.",
+  archiveBackend: "Archive backend: crawl4ai or node. Defaults to crawl4ai.",
+  archiveBackendEndpoint:
+    "Explicit TCP fallback endpoint for a Crawl4AI sidecar. Secure defaults use a local manifest plus Unix socket transport instead.",
   branch: "Branch name. Defaults to the active branch.",
   branchForkSource: "Source branch name or version id to fork from.",
   branchId: "Branch id to attach the artifact to.",
@@ -51,6 +64,7 @@ const HELP_TEXT = {
   researchId: "Research id. Defaults to the active research.",
   source: "Canonical source URI or locator for the evidence item.",
   title: "Short human-readable title.",
+  timeoutMs: "Archive request timeout in milliseconds.",
   toNode: "Target node id or @last-node recent reference.",
   trustLevel: "Numeric trust level for the evidence item.",
   versionId: "Version id to attach the artifact to.",
@@ -65,7 +79,7 @@ const HELP_TEXT = {
 
 const ROOT_HELP_GROUPS = [
   {
-    commands: ["init", "research_list", "research_search", "status", "run", "export"],
+    commands: ["init", "research_list", "research_search", "status", "run", "gate_check", "export"],
     title: "Research"
   },
   {
@@ -84,7 +98,14 @@ const ROOT_HELP_GROUPS = [
     title: "Node"
   },
   {
-    commands: ["evidence_list", "evidence_add", "evidence_show", "evidence_link", "evidence_verify"],
+    commands: [
+      "evidence_list",
+      "evidence_add",
+      "evidence_archive",
+      "evidence_show",
+      "evidence_link",
+      "evidence_verify"
+    ],
     title: "Evidence"
   },
   {
@@ -103,8 +124,8 @@ const ROOT_HELP_GROUPS = [
     title: "Artifact"
   },
   {
-    commands: ["db_status", "db_migrate", "db_doctor", "doctor"],
-    title: "Utility"
+    commands: ["db_status", "db_migrate", "db_doctor", "doctor", "sidecar_setup"],
+    title: "Health"
   }
 ] as const;
 
@@ -235,6 +256,21 @@ export const buildProgram = (): Command => {
           context.service.advanceResearch(options.mode, options.researchId),
           context.options
         );
+      } finally {
+        context.close();
+      }
+    });
+
+  program
+    .command("gate_check")
+    .description("Validate execution gates before final reporting")
+    .option("--research-id <id>", HELP_TEXT.researchId)
+    .option("--branch <name>", HELP_TEXT.branch)
+    .action((options, command) => {
+      const context = createContext(command);
+      try {
+        const report = context.service.ensureReportExecutionGates(options.researchId, options.branch);
+        writeSuccess("gate_check", report, context.options);
       } finally {
         context.close();
       }
@@ -511,6 +547,43 @@ export const buildProgram = (): Command => {
             researchId: options.researchId,
             sourceUri: options.source,
             summary: options.summary,
+            title: options.title,
+            trustLevel: options.trustLevel ? Number(options.trustLevel) : undefined
+          }),
+          outputOptionsFor(context)
+        );
+      } finally {
+        context.close();
+      }
+    });
+  addCommand(program, "evidence_archive", "Archive a source URI as evidence")
+    .description("Archive a source URI as evidence")
+    .requiredOption("--source <uri>", HELP_TEXT.source)
+    .option("--title <text>", HELP_TEXT.title)
+    .option("--summary <text>", "Short evidence summary used during review and export.")
+    .option("--trust-level <n>", HELP_TEXT.trustLevel)
+    .option("--published-at <iso>", HELP_TEXT.publishedAt)
+    .option("--research-id <id>", HELP_TEXT.researchId)
+    .option("--backend <crawl4ai|node>", HELP_TEXT.archiveBackend, "crawl4ai")
+    .option("--backend-endpoint <url>", HELP_TEXT.archiveBackendEndpoint)
+    .option("--timeout-ms <n>", HELP_TEXT.timeoutMs, "15000")
+    .action(async (options, command) => {
+      const context = createContext(command);
+      try {
+        if (options.backend === "crawl4ai" && !options.backendEndpoint) {
+          await context.ensureManagedCrawl4aiSidecar();
+        }
+        writeSuccess(
+          "evidence_archive",
+          await context.service.archiveEvidence({
+            backend: options.backend,
+            backendEndpoint: options.backendEndpoint,
+            publishedAt: options.publishedAt,
+            researchId: options.researchId,
+            sidecarManifestPath: context.paths.sidecarManifestPath,
+            sourceUri: options.source,
+            summary: options.summary,
+            timeoutMs: Number(options.timeoutMs),
             title: options.title,
             trustLevel: options.trustLevel ? Number(options.trustLevel) : undefined
           }),
@@ -805,6 +878,7 @@ export const buildProgram = (): Command => {
     .action((options, command) => {
       const context = createContext(command);
       try {
+        ensureReportGatesIfNeeded(context, options.researchId);
         writeSuccess(
           "artifact_export",
           context.options.format === "json"
@@ -864,6 +938,29 @@ export const buildProgram = (): Command => {
     }
   });
 
+  program
+    .command("sidecar_setup")
+    .description("Inspect or explicitly prepare the managed Crawl4AI sidecar runtime")
+    .option("--run-setup", "Create or update the shared program Crawl4AI venv, install requirements, and run crawl4ai-setup")
+    .option("--run-doctor", "Run crawl4ai-doctor inside the shared program Crawl4AI venv")
+    .action((options, command) => {
+      const context = createContext(command);
+      try {
+        if (options.runSetup && options.runDoctor) {
+          throw new Error("sidecar_setup accepts either --run-setup or --run-doctor, not both.");
+        }
+
+        const result = options.runSetup
+          ? context.runManagedCrawl4aiAction("setup")
+          : options.runDoctor
+            ? context.runManagedCrawl4aiAction("doctor")
+            : context.inspectManagedCrawl4aiSidecar();
+        writeSuccess("sidecar_setup", result, context.options);
+      } finally {
+        context.close();
+      }
+    });
+
   program.command("doctor").description("Run a project health check").action((_options, command) => {
     const context = createContext(command);
     try {
@@ -874,9 +971,11 @@ export const buildProgram = (): Command => {
           projectRoot: context.paths.projectRoot,
           resources: {
             references: path.join(context.paths.projectRoot, "resources", "references"),
+            sidecarRequirements: path.join(context.paths.projectRoot, "resources", "sidecar", "requirements.txt"),
             skill: path.join(context.paths.projectRoot, "SKILL.md")
           },
-          researchCount: context.service.listResearchs().length
+          researchCount: context.service.listResearchs().length,
+          sidecarRuntime: context.inspectManagedCrawl4aiSidecar()
         },
         context.options
       );
@@ -888,6 +987,7 @@ export const buildProgram = (): Command => {
   program.command("export").description("Export a research report").option("--research-id <id>", HELP_TEXT.researchId).option("--branch <name>", HELP_TEXT.branch).action((options, command) => {
     const context = createContext(command);
     try {
+      ensureReportGatesIfNeeded(context, options.researchId, options.branch);
       writeSuccess(
         "export",
         context.options.format === "json"

@@ -63,14 +63,18 @@ describe("ResearchService", () => {
     });
 
     const questionNode = fixture.service.addNode({
+      epistemicState: "supported",
       kind: "question",
       researchId: research.id,
+      workflowState: "ready",
       title: "Has churn increased?"
     });
     const hypothesisNode = fixture.service.addNode({
       body: "Users were exposed to a pricing change.",
+      epistemicState: "supported",
       kind: "hypothesis",
       researchId: research.id,
+      workflowState: "ready",
       title: "Pricing drove churn"
     });
     fixture.service.addEdge({
@@ -118,8 +122,11 @@ describe("ResearchService", () => {
       title: "Alternative branch summary",
       versionId: snapshot.id
     });
+    fixture.service.advanceResearch("synthesize", research.id);
+    fixture.service.advanceResearch("review", research.id);
 
     const diff = fixture.service.diffBranches("main", "alt-hypothesis", research.id);
+    const executionGates = fixture.service.checkExecutionGates(research.id, "alt-hypothesis");
     const report = fixture.service.exportReport(research.id, "alt-hypothesis");
     const nodeSearchResults = fixture.service.listResearchs("Onboarding");
     const evidenceSummarySearchResults = fixture.service.listResearchs("quokka_signal");
@@ -141,6 +148,7 @@ describe("ResearchService", () => {
     expect(artifactSearchResults).toHaveLength(1);
     expect(branchList.find((branch) => branch.name === altBranch.name)?.parentBranchId).toBeDefined();
     expect(branchList.find((branch) => branch.name === nestedBranch.name)?.parentBranchId).toBe(altBranch.id);
+    expect(executionGates.ok).toBe(true);
     expect(evidenceDetail.verifiedAt).not.toBeNull();
     expect(artifact.title).toBe("Alternative branch summary");
     expect(versions[0]?.id).toBe(snapshot.id);
@@ -230,6 +238,88 @@ describe("ResearchService", () => {
     expect(afterStatus.branch.headVersionId).toBe(beforeStatus.branch.headVersionId);
     expect(afterVersionCount).toBe(beforeVersionCount);
     expect(afterEventCount).toBe(beforeEventCount);
+    fixture.cleanup();
+  });
+
+  it("archives evidence, records degraded fallback, and keeps web archives out of readable reports", async () => {
+    const fixture = createProjectFixture();
+    const research = fixture.service.initResearch({
+      question: "Can evidence archives preserve metadata without leaking body text into reports?",
+      title: "Evidence archive report boundary"
+    });
+    const questionNode = fixture.service.addNode({
+      kind: "question",
+      researchId: research.id,
+      title: "Should archive metadata survive failure paths?",
+      workflowState: "ready",
+      epistemicState: "supported"
+    });
+    const hypothesisNode = fixture.service.addNode({
+      kind: "hypothesis",
+      researchId: research.id,
+      title: "Archive state should remain explicit",
+      workflowState: "ready",
+      epistemicState: "supported"
+    });
+    fixture.service.addEdge({
+      fromNodeId: questionNode.id,
+      kind: "supports",
+      researchId: research.id,
+      toNodeId: hypothesisNode.id
+    });
+
+    const archiveBodySignal = "ARCHIVE_BODY_SIGNAL";
+    const archivedHtml = Buffer.from(
+      `<html><head><title>Archive Source</title></head><body>${archiveBodySignal} retained only in artifact storage.</body></html>`,
+      "utf8"
+    ).toString("base64");
+    const archived = await fixture.service.archiveEvidence({
+      backend: "node",
+      researchId: research.id,
+      sourceUri: `data:text/html;base64,${archivedHtml}`,
+      trustLevel: 4
+    });
+    const degraded = await fixture.service.archiveEvidence({
+      backend: "node",
+      researchId: research.id,
+      sourceUri: "data:application/octet-stream;base64,AA=="
+    });
+
+    fixture.service.verifyEvidence(archived.evidence.id, "verified archived evidence", research.id, 5);
+    fixture.service.linkEvidence({
+      evidenceId: archived.evidence.id,
+      nodeId: hypothesisNode.id,
+      relation: "supports",
+      researchId: research.id
+    });
+    fixture.service.addArtifact({
+      artifactKind: "summary",
+      body: "Readable summary artifact for the report surface.",
+      researchId: research.id,
+      title: "Readable summary"
+    });
+    fixture.service.advanceResearch("synthesize", research.id);
+    fixture.service.advanceResearch("review", research.id);
+
+    const artifacts = fixture.service.listArtifacts(research.id);
+    const report = fixture.service.exportReport(research.id);
+
+    expect(archived.archive.status).toBe("archived");
+    expect(archived.evidence.archiveStatus).toBe("archived");
+    expect(archived.archive.artifactId).toBeTruthy();
+    expect(degraded.archive.status).toBe("degraded");
+    expect(degraded.evidence.archiveStatus).toBe("degraded");
+    expect(degraded.archive.artifactId).toBeNull();
+    expect(degraded.evidence.failureReason).toContain("UNSUPPORTED_CONTENT_TYPE");
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts.find((artifact) => artifact.artifactKind === "web_archive")?.evidenceId).toBe(
+      archived.evidence.id
+    );
+    expect(report).toContain("archive=archived");
+    expect(report).toContain("archive=degraded");
+    expect(report).toContain("reason=UNSUPPORTED_CONTENT_TYPE");
+    expect(report).toContain("Readable summary artifact for the report surface.");
+    expect(report).not.toContain(archiveBodySignal);
     fixture.cleanup();
   });
 });

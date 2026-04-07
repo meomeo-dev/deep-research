@@ -17,6 +17,11 @@ tmp/
 Thumbs.db
 .env.local
 .env.*.local
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
 db/*.sqlite
 db/*.db
 examples/readme-dag-50-demo/project/

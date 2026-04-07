@@ -628,7 +628,8 @@ const classifyTextScript = (
     return "latin";
   }
 
-  if (/^[\u0000-\u024f]$/.test(char)) {
+  const codePoint = char.codePointAt(0);
+  if (codePoint !== undefined && codePoint <= 0x024f) {
     return previousScript ?? "latin";
   }
 

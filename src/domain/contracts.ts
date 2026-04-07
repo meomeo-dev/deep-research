@@ -64,6 +64,10 @@ export const edgeKinds = [
 
 export const evidenceRelations = ["supports", "refutes", "annotates"] as const;
 
+export const evidenceArchiveStatuses = ["none", "archived", "degraded"] as const;
+
+export const evidenceArchiveBackends = ["node", "crawl4ai"] as const;
+
 export type ResearchLifecycleState = (typeof researchLifecycleStates)[number];
 export type ResearchMaturityState = (typeof researchMaturityStates)[number];
 export type BranchState = (typeof branchStates)[number];
@@ -72,6 +76,8 @@ export type NodeWorkflowState = (typeof nodeWorkflowStates)[number];
 export type NodeEpistemicState = (typeof nodeEpistemicStates)[number];
 export type EdgeKind = (typeof edgeKinds)[number];
 export type EvidenceRelation = (typeof evidenceRelations)[number];
+export type EvidenceArchiveStatus = (typeof evidenceArchiveStatuses)[number];
+export type EvidenceArchiveBackend = (typeof evidenceArchiveBackends)[number];
 
 export interface ResearchRecord {
   id: string;
@@ -130,6 +136,8 @@ export interface EvidenceView {
   publishedAt: string | null;
   verifiedAt: string | null;
   verificationNotes: string;
+  archiveStatus: EvidenceArchiveStatus;
+  failureReason: string | null;
 }
 
 export interface ArtifactView {
@@ -140,7 +148,21 @@ export interface ArtifactView {
   branchId: string | null;
   versionId: string | null;
   nodeId: string | null;
+  evidenceId: string | null;
   createdAt: string;
+}
+
+export interface EvidenceArchiveRecord {
+  status: Exclude<EvidenceArchiveStatus, "none">;
+  artifactId: string | null;
+  artifactKind: string | null;
+  backend: EvidenceArchiveBackend;
+  failureReason: string | null;
+}
+
+export interface EvidenceArchiveView {
+  evidence: EvidenceView;
+  archive: EvidenceArchiveRecord;
 }
 
 export interface GraphEvidenceLinkView {

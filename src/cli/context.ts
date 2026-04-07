@@ -7,6 +7,13 @@ import {
   resolveProjectPaths,
   type ProjectPaths
 } from "../infrastructure/persistence/sqlite/db";
+import {
+  inspectManagedCrawl4aiRuntime,
+  ManagedCrawl4aiSidecar,
+  runManagedCrawl4aiAction,
+  type ManagedCrawl4aiActionResult,
+  type ManagedCrawl4aiRuntimeInspection
+} from "../infrastructure/sidecar/crawl4ai-sidecar-manager";
 import { runMigrations } from "../infrastructure/persistence/sqlite/migrate";
 import type { OutputFormat, OutputMode } from "./output";
 
@@ -29,6 +36,9 @@ export interface CommandContext {
     output?: string;
     project: string;
   };
+  ensureManagedCrawl4aiSidecar: () => Promise<void>;
+  inspectManagedCrawl4aiSidecar: () => ManagedCrawl4aiRuntimeInspection;
+  runManagedCrawl4aiAction: (action: "setup" | "doctor") => ManagedCrawl4aiActionResult;
   paths: ProjectPaths;
   migrations: string[];
   service: ResearchService;
@@ -59,12 +69,33 @@ export const createContext = (command: Command): CommandContext => {
   ensureProjectDataDir(paths);
   const db = openDatabase(paths.dbPath);
   const migrations = runMigrations(db);
+  const managedCrawl4aiSidecar = new ManagedCrawl4aiSidecar({
+    manifestPath: paths.sidecarManifestPath,
+    projectRoot: options.project
+  });
 
   return {
-    close: () => db.close(),
+    close: () => {
+      managedCrawl4aiSidecar.close();
+      db.close();
+    },
+    ensureManagedCrawl4aiSidecar: async () => {
+      await managedCrawl4aiSidecar.ensureReady();
+    },
+    inspectManagedCrawl4aiSidecar: () =>
+      inspectManagedCrawl4aiRuntime({
+        manifestPath: paths.sidecarManifestPath,
+        projectRoot: options.project
+      }),
     migrations,
     options,
     paths,
+    runManagedCrawl4aiAction: (action) =>
+      runManagedCrawl4aiAction({
+        action,
+        manifestPath: paths.sidecarManifestPath,
+        projectRoot: options.project
+      }),
     service: new ResearchService(db)
   };
 };

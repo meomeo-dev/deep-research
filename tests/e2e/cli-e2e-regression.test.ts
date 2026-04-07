@@ -3,10 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { ensureDistBuilt } from "../support/ensure-dist-built";
 
 const tempRoots: string[] = [];
 const distCliEntry = path.join(process.cwd(), "dist", "cli", "main.js");
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 type CliResult = {
   code: number;
@@ -49,11 +49,20 @@ const createProjectFixture = (): string => {
   return fixtureRoot;
 };
 
-const runDistCli = (args: string[]): CliResult => {
+const createExecutableScript = (filePath: string, content: string): string => {
+  fs.writeFileSync(filePath, content, "utf8");
+  fs.chmodSync(filePath, 0o755);
+  return filePath;
+};
+
+const runDistCli = (args: string[], extraEnv?: Record<string, string>): CliResult => {
   const result = spawnSync(process.execPath, [distCliEntry, ...args], {
     cwd: process.cwd(),
     encoding: "utf8",
-    env: process.env
+    env: {
+      ...process.env,
+      ...extraEnv
+    }
   });
 
   return {
@@ -84,10 +93,11 @@ const runJsonCommand = <T>(
   executed: Set<string>,
   fixtureRoot: string,
   command: string,
-  args: string[] = []
+  args: string[] = [],
+  extraEnv?: Record<string, string>
 ): Envelope<T> => {
   executed.add(command);
-  const result = runDistCli(["--project", fixtureRoot, "--format", "json", command, ...args]);
+  const result = runDistCli(["--project", fixtureRoot, "--format", "json", command, ...args], extraEnv);
   assertSuccess(command, result);
   return JSON.parse(result.stdout) as Envelope<T>;
 };
@@ -102,13 +112,7 @@ afterEach(() => {
 });
 
 beforeAll(() => {
-  const buildResult = spawnSync(packageManager, ["build"], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: process.env
-  });
-
-  expect(buildResult.status ?? 1).toBe(0);
+  ensureDistBuilt();
 });
 
 describe("CLI e2e regression", () => {
@@ -196,6 +200,9 @@ describe("CLI e2e regression", () => {
       doctor: () => {
         runJsonCommand(executedCommands, fixtureRoot, "doctor");
       },
+      gate_check: () => {
+        runJsonCommand(executedCommands, fixtureRoot, "gate_check");
+      },
       evidence_add: () => {
         const payload = runJsonCommand<EvidenceRecord>(executedCommands, fixtureRoot, "evidence_add", [
           "--source",
@@ -208,6 +215,28 @@ describe("CLI e2e regression", () => {
           "4"
         ]);
         state.evidenceId = payload.data.id;
+      },
+      evidence_archive: () => {
+        runJsonCommand<{ archive: { status: string } }>(executedCommands, fixtureRoot, "evidence_archive", [
+          "--backend",
+          "node",
+          "--source",
+          `data:text/html,${encodeURIComponent("<html><head><title>E2E archive</title></head><body>E2E archive body</body></html>")}`
+        ]);
+        runJsonCommand(executedCommands, fixtureRoot, "evidence_verify", [
+          "--evidence",
+          "@last-evidence",
+          "--notes",
+          "verified archived evidence in cli e2e regression"
+        ]);
+        runJsonCommand(executedCommands, fixtureRoot, "evidence_link", [
+          "--node",
+          state.findingNodeId,
+          "--evidence",
+          "@last-evidence",
+          "--relation",
+          "supports"
+        ]);
       },
       evidence_link: () => {
         runJsonCommand(executedCommands, fixtureRoot, "evidence_link", [
@@ -299,25 +328,41 @@ describe("CLI e2e regression", () => {
           "--kind",
           "question",
           "--title",
-          "E2E root question"
+          "E2E root question",
+          "--workflow-state",
+          "ready",
+          "--epistemic-state",
+          "supported"
         ]).data.id;
         state.hypothesisNodeId = runJsonCommand<NodeRecord>(executedCommands, fixtureRoot, "node_add", [
           "--kind",
           "hypothesis",
           "--title",
-          "E2E hypothesis"
+          "E2E hypothesis",
+          "--workflow-state",
+          "ready",
+          "--epistemic-state",
+          "supported"
         ]).data.id;
         state.findingNodeId = runJsonCommand<NodeRecord>(executedCommands, fixtureRoot, "node_add", [
           "--kind",
           "finding",
           "--title",
-          "E2E finding"
+          "E2E finding",
+          "--workflow-state",
+          "ready",
+          "--epistemic-state",
+          "supported"
         ]).data.id;
         state.gapNodeId = runJsonCommand<NodeRecord>(executedCommands, fixtureRoot, "node_add", [
           "--kind",
           "gap",
           "--title",
-          "E2E gap"
+          "E2E gap",
+          "--workflow-state",
+          "blocked",
+          "--epistemic-state",
+          "inconclusive"
         ]).data.id;
         state.noteNodeId = runJsonCommand<NodeRecord>(executedCommands, fixtureRoot, "node_add", [
           "--kind",
@@ -329,7 +374,11 @@ describe("CLI e2e regression", () => {
           "--kind",
           "conclusion",
           "--title",
-          "E2E conclusion"
+          "E2E conclusion",
+          "--workflow-state",
+          "ready",
+          "--epistemic-state",
+          "supported"
         ]).data.id;
       },
       node_list: () => {
@@ -369,10 +418,71 @@ describe("CLI e2e regression", () => {
         ]);
       },
       run: () => {
+        runJsonCommand(executedCommands, fixtureRoot, "run", ["--mode", "synthesize"]);
         runJsonCommand(executedCommands, fixtureRoot, "run", ["--mode", "review"]);
       },
       status: () => {
         runJsonCommand(executedCommands, fixtureRoot, "status");
+      },
+      sidecar_setup: () => {
+        const markerPath = path.join(fixtureRoot, "e2e-sidecar-setup.marker");
+        const fakePython = createExecutableScript(
+          path.join(fixtureRoot, "e2e-fake-python.sh"),
+          [
+            "#!/bin/sh",
+            "if [ \"$1\" = \"--version\" ]; then",
+            "  echo 'Python 3.11.9'",
+            "  exit 0",
+            "fi",
+            "if [ \"$1\" = \"-c\" ]; then",
+            "  exit 1",
+            "fi",
+            "exit 0"
+          ].join("\n")
+        );
+        const setupCommand = createExecutableScript(
+          path.join(fixtureRoot, "crawl4ai-setup"),
+          ["#!/bin/sh", `echo setup-ran > "${markerPath}"`, "echo e2e-setup-complete", "exit 0"].join("\n")
+        );
+        const doctorCommand = createExecutableScript(
+          path.join(fixtureRoot, "crawl4ai-doctor"),
+          ["#!/bin/sh", "echo e2e-doctor-complete", "exit 0"].join("\n")
+        );
+        const extraEnv = {
+          DEEP_RESEARCH_CRAWL4AI_DOCTOR_COMMAND: doctorCommand,
+          DEEP_RESEARCH_CRAWL4AI_PYTHON: fakePython,
+          DEEP_RESEARCH_CRAWL4AI_SETUP_COMMAND: setupCommand
+        };
+
+        const inspectPayload = runJsonCommand<{ status: string }>(
+          executedCommands,
+          fixtureRoot,
+          "sidecar_setup",
+          [],
+          extraEnv
+        );
+        expect(inspectPayload.data.status).toBe("needs_setup");
+
+        const setupPayload = runJsonCommand<{ action: string; exitCode: number }>(
+          executedCommands,
+          fixtureRoot,
+          "sidecar_setup",
+          ["--run-setup"],
+          extraEnv
+        );
+        expect(setupPayload.data.action).toBe("setup");
+        expect(setupPayload.data.exitCode).toBe(0);
+        expect(fs.existsSync(markerPath)).toBe(true);
+
+        const doctorPayload = runJsonCommand<{ action: string; exitCode: number }>(
+          executedCommands,
+          fixtureRoot,
+          "sidecar_setup",
+          ["--run-doctor"],
+          extraEnv
+        );
+        expect(doctorPayload.data.action).toBe("doctor");
+        expect(doctorPayload.data.exitCode).toBe(0);
       },
       version_list: () => {
         runJsonCommand(executedCommands, fixtureRoot, "version_list", ["--branch", "main"]);
@@ -395,6 +505,7 @@ describe("CLI e2e regression", () => {
     runPlan("node_move");
     runPlan("node_resolve");
     runPlan("evidence_add");
+    runPlan("evidence_archive");
     runPlan("evidence_list");
     runPlan("evidence_show");
     runPlan("evidence_verify");
@@ -406,6 +517,8 @@ describe("CLI e2e regression", () => {
     runPlan("version_list");
     runPlan("artifact_add");
     runPlan("artifact_list");
+    runPlan("run");
+    runPlan("gate_check");
     runPlan("artifact_export");
     runPlan("graph_export");
     runPlan("graph_visualize");
@@ -413,7 +526,7 @@ describe("CLI e2e regression", () => {
     runPlan("db_migrate");
     runPlan("db_doctor");
     runPlan("doctor");
-    runPlan("run");
+    runPlan("sidecar_setup");
     runPlan("export");
     runPlan("branch_list");
     runPlan("branch_create");

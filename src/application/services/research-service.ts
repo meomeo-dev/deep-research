@@ -1,7 +1,14 @@
 import type Database from "better-sqlite3";
 import {
+  type ExecutionGateReport,
+  evaluateExecutionGates
+} from "../gates/execution-gates";
+import {
+  type EvidenceArchiveBackend,
+  type EvidenceArchiveView,
   type ArtifactView,
   edgeKinds,
+  evidenceArchiveStatuses,
   evidenceRelations,
   type GraphEvidenceLinkView,
   type GraphEvidenceSummaryView,
@@ -23,6 +30,7 @@ import {
 import { assertAcyclic } from "../../domain/graph";
 import { AppError } from "../../shared/errors";
 import { createId } from "../../shared/ids";
+import { archiveEvidenceWithBackend } from "./evidence-archive-backends";
 
 const now = (): string => new Date().toISOString();
 
@@ -637,7 +645,7 @@ export class ResearchService {
       .prepare(
         `
           SELECT id, source_uri, title, summary, trust_level, published_at,
-                 verified_at, verification_notes
+                 verified_at, verification_notes, archive_status, failure_reason
           FROM evidence_items
           WHERE research_id = ?
           ORDER BY created_at DESC
@@ -698,6 +706,108 @@ export class ResearchService {
       this.recordEvent(research.id, null, null, "evidence", evidenceId, "evidence_added", input);
     })();
     return this.requireEvidence(evidenceId);
+  }
+
+  async archiveEvidence(input: {
+    researchId?: string;
+    sourceUri: string;
+    title?: string;
+    summary?: string;
+    trustLevel?: number;
+    publishedAt?: string;
+    backend?: EvidenceArchiveBackend;
+    backendEndpoint?: string;
+    sidecarManifestPath?: string;
+    timeoutMs?: number;
+  }): Promise<EvidenceArchiveView> {
+    const research = this.resolveResearch(input.researchId);
+    const archiveResult = await archiveEvidenceWithBackend({
+      backend: input.backend ?? "crawl4ai",
+      backendEndpoint: input.backendEndpoint,
+      sidecarManifestPath: input.sidecarManifestPath,
+      sourceUri: input.sourceUri,
+      timeoutMs: input.timeoutMs ?? 15000
+    });
+    const evidenceId = createId("evidence");
+    const artifactId = archiveResult.status === "archived" ? createId("artifact") : null;
+    const evidenceTitle = input.title?.trim() || archiveResult.title;
+    const evidenceSummary = input.summary?.trim() || archiveResult.summary;
+    const timestamp = now();
+
+    this.db.transaction(() => {
+      this.db.prepare(
+        `
+          INSERT INTO evidence_items (
+            id, research_id, source_uri, title, summary, trust_level, published_at,
+            verified_at, verification_notes, archive_status, failure_reason, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, '', ?, ?, ?)
+        `
+      ).run(
+        evidenceId,
+        research.id,
+        archiveResult.sourceUri,
+        evidenceTitle,
+        evidenceSummary,
+        input.trustLevel ?? 3,
+        input.publishedAt ?? null,
+        archiveResult.status,
+        archiveResult.failureReason,
+        timestamp
+      );
+
+      if (artifactId && archiveResult.body) {
+        this.db.prepare(
+          `
+            INSERT INTO artifacts (
+              id, research_id, branch_id, version_id, node_id,
+              evidence_id, artifact_kind, title, body, created_at
+            ) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)
+          `
+        ).run(
+          artifactId,
+          research.id,
+          evidenceId,
+          "web_archive",
+          evidenceTitle,
+          archiveResult.body,
+          timestamp
+        );
+
+        this.db.prepare(
+          `
+            INSERT INTO artifact_fts (artifact_id, research_id, title, body)
+            VALUES (?, ?, ?, ?)
+          `
+        ).run(artifactId, research.id, evidenceTitle, archiveResult.body);
+      }
+
+      this.recordEvent(
+        research.id,
+        null,
+        null,
+        "evidence",
+        evidenceId,
+        archiveResult.status === "archived" ? "evidence_archived" : "evidence_archive_degraded",
+        {
+          artifactId,
+          backend: archiveResult.backend,
+          failureReason: archiveResult.failureReason,
+          sourceUri: archiveResult.sourceUri,
+          status: archiveResult.status
+        }
+      );
+    })();
+
+    return {
+      archive: {
+        artifactId,
+        artifactKind: artifactId ? "web_archive" : null,
+        backend: archiveResult.backend,
+        failureReason: archiveResult.failureReason,
+        status: archiveResult.status
+      },
+      evidence: this.requireEvidence(evidenceId)
+    };
   }
 
   verifyEvidence(
@@ -827,7 +937,8 @@ export class ResearchService {
     return this.db
       .prepare(
         `
-          SELECT id, artifact_kind, title, body, branch_id, version_id, node_id, created_at
+          SELECT id, artifact_kind, title, body, branch_id, version_id, node_id,
+                 evidence_id, created_at
           FROM artifacts
           WHERE research_id = ?
           ORDER BY created_at DESC
@@ -855,8 +966,8 @@ export class ResearchService {
         `
           INSERT INTO artifacts (
             id, research_id, branch_id, version_id, node_id,
-            artifact_kind, title, body, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            evidence_id, artifact_kind, title, body, created_at
+          ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
         `
       ).run(
         artifactId,
@@ -910,6 +1021,32 @@ export class ResearchService {
     };
   }
 
+  checkExecutionGates(researchId?: string, branchName?: string): ExecutionGateReport {
+    const context = this.collectExecutionGateContext(researchId, branchName);
+    return evaluateExecutionGates({
+      branch: context.branch,
+      checkedAt: now(),
+      evidence: context.evidence,
+      graph: context.graph,
+      lifecycleRuns: this.listLifecycleAdvanceModes(context.research.id),
+      nodes: context.graph.nodes,
+      research: context.research
+    });
+  }
+
+  ensureReportExecutionGates(researchId?: string, branchName?: string): ExecutionGateReport {
+    const report = this.checkExecutionGates(researchId, branchName);
+    if (!report.ok) {
+      throw new AppError(
+        "REPORT_EXPORT_GATES_FAILED",
+        "Execution gates failed for final report export. Run gate_check to inspect blockers.",
+        2,
+        report as unknown as Record<string, unknown>
+      );
+    }
+    return report;
+  }
+
   exportReport(researchId?: string, branchName?: string): string {
     const status = this.getStatus(researchId, branchName);
     const branch = status.branch as BranchRecord;
@@ -920,8 +1057,15 @@ export class ResearchService {
     const artifacts = this.listArtifacts(research.id).filter(
       (artifact) => artifact.branchId === null || artifact.branchId === branch.id
     );
-    const conclusionArtifacts = artifacts.filter((artifact) => /conclusion|summary|final/i.test(artifact.artifactKind));
-    const readableArtifacts = conclusionArtifacts.length > 0 ? conclusionArtifacts : artifacts;
+    const readableArtifactCandidates = artifacts.filter(
+      (artifact) => artifact.artifactKind !== "web_archive"
+    );
+    const conclusionArtifacts = readableArtifactCandidates.filter(
+      (artifact) => /conclusion|summary|final/i.test(artifact.artifactKind)
+    );
+    const readableArtifacts = conclusionArtifacts.length > 0
+      ? conclusionArtifacts
+      : readableArtifactCandidates;
 
     return [
       `# ${research.title}`,
@@ -950,8 +1094,13 @@ export class ResearchService {
       "",
       "## Evidence",
       ...evidence.map(
-        (item) =>
-          `- ${item.title} | trust=${item.trustLevel} | source=${item.sourceUri}`
+        (item) => {
+          const degradedReason =
+            item.archiveStatus === "degraded" && item.failureReason
+              ? ` | reason=${item.failureReason}`
+              : "";
+          return `- ${item.title} | trust=${item.trustLevel} | source=${item.sourceUri} | archive=${item.archiveStatus}${degradedReason}`;
+        }
       ),
       "",
       "## Evidence Links",
@@ -977,7 +1126,8 @@ export class ResearchService {
       `
         SELECT nel.node_id, nel.evidence_id, nel.relation_kind,
                ei.source_uri, ei.title, ei.summary, ei.trust_level,
-               ei.published_at, ei.verified_at, ei.verification_notes
+               ei.published_at, ei.verified_at, ei.verification_notes,
+               ei.archive_status, ei.failure_reason
         FROM node_evidence_links nel
         JOIN evidence_items ei ON ei.id = nel.evidence_id
         WHERE nel.research_id = ?
@@ -1004,6 +1154,8 @@ export class ResearchService {
         summary: row.summary,
         title: row.title,
         trust_level: row.trust_level,
+        archive_status: row.archive_status,
+        failure_reason: row.failure_reason,
         verification_notes: row.verification_notes,
         verified_at: row.verified_at
       });
@@ -1293,7 +1445,7 @@ export class ResearchService {
       .prepare(
         `
           SELECT id, source_uri, title, summary, trust_level, published_at,
-                 verified_at, verification_notes
+                 verified_at, verification_notes, archive_status, failure_reason
           FROM evidence_items
           WHERE id = ?
         `
@@ -1309,7 +1461,8 @@ export class ResearchService {
     const row = this.db
       .prepare(
         `
-          SELECT id, artifact_kind, title, body, branch_id, version_id, node_id, created_at
+          SELECT id, artifact_kind, title, body, branch_id, version_id, node_id,
+                 evidence_id, created_at
           FROM artifacts
           WHERE id = ?
         `
@@ -1337,6 +1490,57 @@ export class ResearchService {
         kind: String((row as Row).edge_kind) as EdgeKind,
         toNodeId: String((row as Row).to_node_id)
       }));
+  }
+
+  private collectExecutionGateContext(researchId?: string, branchName?: string): {
+    research: ResearchRecord;
+    branch: BranchRecord;
+    evidence: EvidenceView[];
+    graph: GraphView;
+  } {
+    const research = this.resolveResearch(researchId);
+    const branch = branchName
+      ? this.requireBranchByName(research.id, branchName)
+      : this.requireCurrentBranch(research.id);
+
+    return {
+      branch,
+      evidence: this.listEvidence(research.id),
+      graph: this.showGraph(research.id, branch.name),
+      research
+    };
+  }
+
+  private listLifecycleAdvanceModes(researchId: string): string[] {
+    return this.db
+      .prepare(
+        `
+          SELECT payload_json
+          FROM events
+          WHERE research_id = ? AND event_type = 'research_advanced'
+          ORDER BY occurred_at ASC
+        `
+      )
+      .all(researchId)
+      .flatMap((row) => {
+        const payload = this.parsePayloadRecord((row as Row).payload_json);
+        return typeof payload.mode === "string" ? [payload.mode] : [];
+      });
+  }
+
+  private parsePayloadRecord(value: unknown): Record<string, unknown> {
+    if (typeof value !== "string") {
+      return {};
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+    return {};
   }
 
   private recordEvent(
@@ -1419,6 +1623,12 @@ export class ResearchService {
 
   private mapEvidence(row: Row): EvidenceView {
     return {
+      archiveStatus: evidenceArchiveStatuses.includes(
+        (row.archive_status ? String(row.archive_status) : "none") as EvidenceView["archiveStatus"]
+      )
+        ? ((row.archive_status ? String(row.archive_status) : "none") as EvidenceView["archiveStatus"])
+        : "none",
+      failureReason: row.failure_reason ? String(row.failure_reason) : null,
       id: String(row.id),
       publishedAt: row.published_at ? String(row.published_at) : null,
       sourceUri: String(row.source_uri),
@@ -1436,6 +1646,7 @@ export class ResearchService {
       body: String(row.body),
       branchId: row.branch_id ? String(row.branch_id) : null,
       createdAt: String(row.created_at),
+      evidenceId: row.evidence_id ? String(row.evidence_id) : null,
       id: String(row.id),
       nodeId: row.node_id ? String(row.node_id) : null,
       title: String(row.title),

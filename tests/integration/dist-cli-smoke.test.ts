@@ -3,10 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { ensureDistBuilt } from "../support/ensure-dist-built";
 
 const tempRoots: string[] = [];
 const distCliEntry = path.join(process.cwd(), "dist", "cli", "main.js");
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 const createProjectFixture = (): string => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "deep-research-dist-cli-"));
@@ -38,13 +38,7 @@ afterEach(() => {
 });
 
 beforeAll(() => {
-  const buildResult = spawnSync(packageManager, ["build"], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: process.env
-  });
-
-  expect(buildResult.status ?? 1).toBe(0);
+  ensureDistBuilt();
 });
 
 describe("dist CLI release surface", () => {
@@ -135,6 +129,27 @@ describe("dist CLI release surface", () => {
         "question",
         "--title",
         "Dist artifact export question",
+        "--workflow-state",
+        "ready",
+        "--epistemic-state",
+        "supported",
+        "--format",
+        "json"
+      ]).code
+    ).toBe(0);
+    expect(
+      runDistCli([
+        "node_add",
+        "--project",
+        fixtureRoot,
+        "--kind",
+        "hypothesis",
+        "--title",
+        "Dist artifact export hypothesis",
+        "--workflow-state",
+        "ready",
+        "--epistemic-state",
+        "supported",
         "--format",
         "json"
       ]).code
@@ -148,6 +163,56 @@ describe("dist CLI release surface", () => {
         "conclusion",
         "--title",
         "Dist artifact export conclusion",
+        "--workflow-state",
+        "ready",
+        "--epistemic-state",
+        "supported",
+        "--format",
+        "json"
+      ]).code
+    ).toBe(0);
+    const nodeList = JSON.parse(
+      runDistCli(["node_list", "--project", fixtureRoot, "--format", "json"]).stdout
+    ) as { data: Array<{ id: string; title: string }> };
+    const questionNode = nodeList.data.find(
+      (node) => node.title === "Dist artifact export question"
+    );
+    const hypothesisNode = nodeList.data.find(
+      (node) => node.title === "Dist artifact export hypothesis"
+    );
+    const conclusionNode = nodeList.data.find(
+      (node) => node.title === "Dist artifact export conclusion"
+    );
+
+    expect(questionNode?.id).toBeTruthy();
+    expect(hypothesisNode?.id).toBeTruthy();
+    expect(conclusionNode?.id).toBeTruthy();
+    expect(
+      runDistCli([
+        "graph_link",
+        "--project",
+        fixtureRoot,
+        "--from",
+        String(questionNode?.id),
+        "--to",
+        String(hypothesisNode?.id),
+        "--kind",
+        "supports",
+        "--format",
+        "json"
+      ]).code
+    ).toBe(0);
+    expect(
+      runDistCli([
+        "graph_link",
+        "--project",
+        fixtureRoot,
+        "--from",
+        String(hypothesisNode?.id),
+        "--to",
+        String(conclusionNode?.id),
+        "--kind",
+        "supports",
         "--format",
         "json"
       ]).code
@@ -211,6 +276,12 @@ describe("dist CLI release surface", () => {
         "--format",
         "json"
       ]).code
+    ).toBe(0);
+    expect(
+      runDistCli(["run", "--project", fixtureRoot, "--mode", "synthesize", "--format", "json"]).code
+    ).toBe(0);
+    expect(
+      runDistCli(["run", "--project", fixtureRoot, "--mode", "review", "--format", "json"]).code
     ).toBe(0);
 
     const exportResult = runDistCli([

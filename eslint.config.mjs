@@ -5,7 +5,7 @@ import parser from "@typescript-eslint/parser";
 
 export default [
   {
-    ignores: ["dist/**", "coverage/**", ".deep-research/**"]
+    ignores: ["dist/**", "coverage/**", ".deep-research/**", "tmp/**"]
   },
   js.configs.recommended,
   {

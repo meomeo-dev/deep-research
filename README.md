@@ -1,6 +1,6 @@
 # Deep Research Skill
 
-Current package version: `0.1.4`.
+Current package version: `0.1.5`.
 
 TypeScript CLI repository for running deep research as structured state instead of loose notes. It bundles three things: the `deep-research` command, the skill entrypoint in `SKILL.md`, and the reference manuals under `resources/references/`.
 
@@ -19,6 +19,11 @@ Requirements:
 
 - Node.js 22 or newer.
 - pnpm.
+
+Optional managed webpage archiving runtime:
+
+- Python 3.10 or newer if you want `evidence_archive` to use the default managed `crawl4ai` backend.
+- The CLI now manages a shared program sidecar venv under the package root at `.deep-research/crawl4ai-venv`; run `deep-research sidecar_setup --project /path/to/project --run-setup` to create it once, install `resources/sidecar/requirements.txt`, and execute `crawl4ai-setup`.
 
 Install the local CLI from source:
 
@@ -42,6 +47,12 @@ Run the main quality gate:
 pnpm run check
 ```
 
+Validate report-ready execution gates before exporting a final report:
+
+```bash
+deep-research gate_check --project /path/to/project
+```
+
 Run the release gate from a clean install before shipping:
 
 ```bash
@@ -54,7 +65,7 @@ Install the local CLI command:
 pnpm run install:cli
 ```
 
-Package: `deep-research-skill@0.1.4`.
+Package: `deep-research-skill@0.1.5`.
 
 Repository: `https://github.com/meomeo-dev/deep-research.git`.
 
@@ -115,6 +126,9 @@ Current runtime note:
 - PNG export now uses skia-canvas as the default raster engine because this repository prioritizes export speed over minimum file size.
 - Native runtime dependencies are pinned in `pnpm.onlyBuiltDependencies`; if you add another dependency with install-time binaries, update that allowlist, extend `pnpm run native:prepare`, and re-run `pnpm run release:verify`.
 - If `pnpm install` logs `Ignored build scripts`, the supported recovery path is `pnpm run native:prepare`; it runs `pnpm rebuild better-sqlite3 esbuild`, then `npm rebuild better-sqlite3`, and finally probes the native modules directly. If your pnpm config forces `ignore-scripts=true`, clear that first.
+- `evidence_archive` now auto-starts a managed local Crawl4AI sidecar when `--backend crawl4ai` is used without an explicit endpoint or external socket configuration. The default path stays local-only: project manifest + Unix domain socket + bearer token.
+- The managed sidecar runtime is shared per CLI installation: the CLI prepares the package-root `.deep-research/crawl4ai-venv` during `sidecar_setup --run-setup` and then reuses that venv across projects for setup, doctor, and sidecar startup.
+- Internal overrides exist for development and tests: `DEEP_RESEARCH_CRAWL4AI_PYTHON` chooses a bootstrap/interpreted Python path override, and `DEEP_RESEARCH_CRAWL4AI_SERVICE_SCRIPT` points to an alternate service script. They are internal escape hatches, not part of the public CLI contract.
 
 Rebuild and refresh the linked CLI after source changes:
 
@@ -164,6 +178,7 @@ Use the smallest document that answers the question:
 - The persistence layer is SQLite-backed.
 - The public binary name is `deep-research`.
 - `src/index.ts` only re-exports the program builder; the real CLI entry lives under `src/cli/`.
+- `export` and `artifact_export` now enforce report execution gates in plain-text output mode; use `gate_check` to inspect blockers before attempting a final report export.
 - This README intentionally does not duplicate the full command catalog or research workflow contract from `SKILL.md`.
 
 ## License

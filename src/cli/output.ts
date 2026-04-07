@@ -149,6 +149,41 @@ const deriveSemanticContext = (
       };
     }
 
+    if (command === "doctor") {
+      const sidecarRuntime = isRecord(data.sidecarRuntime) ? data.sidecarRuntime : undefined;
+      const status = typeof sidecarRuntime?.status === "string" ? sidecarRuntime.status : "unknown";
+      return {
+        context: {
+          dbPath: typeof data.dbPath === "string" ? data.dbPath : undefined,
+          projectRoot: typeof data.projectRoot === "string" ? data.projectRoot : undefined,
+          researchCount: typeof data.researchCount === "number" ? data.researchCount : undefined,
+          resultType: "record",
+          sidecarStatus: status
+        },
+        summary: `doctor reports sidecar runtime status=${status}.`
+      };
+    }
+
+    if (command === "sidecar_setup") {
+      const status = typeof data.status === "string"
+        ? data.status
+        : typeof data.inspection === "object" && data.inspection !== null && typeof (data.inspection as Record<string, unknown>).status === "string"
+          ? String((data.inspection as Record<string, unknown>).status)
+          : "unknown";
+      const action = typeof data.action === "string" ? data.action : "inspect";
+      return {
+        context: {
+          action,
+          resultType: "record",
+          status
+        },
+        summary:
+          action === "inspect"
+            ? `sidecar_setup inspected the managed Crawl4AI runtime and found status=${status}.`
+            : `sidecar_setup ran ${action} for the managed Crawl4AI runtime.`
+      };
+    }
+
     if (command === "graph_visualize") {
       const htmlPath = typeof data.htmlPath === "string" ? data.htmlPath : "unknown";
       const nodes = typeof data.nodeCount === "number" ? data.nodeCount : 0;
@@ -209,6 +244,29 @@ const deriveSemanticContext = (
           summary: `${command} prepared ${String(artifactCount)} artifact(s) for export.`
         };
       }
+    }
+
+    if (command === "evidence_archive" && isRecord(data)) {
+      const evidence = isRecord(data.evidence) ? data.evidence : undefined;
+      const archive = isRecord(data.archive) ? data.archive : undefined;
+      const status = typeof archive?.status === "string" ? archive.status : "unknown";
+      const backend = typeof archive?.backend === "string" ? archive.backend : undefined;
+      const artifactId = typeof archive?.artifactId === "string" ? archive.artifactId : null;
+      const failureReason = typeof archive?.failureReason === "string" ? archive.failureReason : null;
+      return {
+        context: {
+          artifactId,
+          backend,
+          evidenceId: typeof evidence?.id === "string" ? evidence.id : undefined,
+          failureReason,
+          resultType: "record",
+          status
+        },
+        summary:
+          status === "archived"
+            ? `${command} persisted citation metadata and archived 1 webpage body.`
+            : `${command} persisted citation metadata but archive degraded: ${failureReason ?? "unknown reason"}.`
+      };
     }
 
     const primaryId = typeof data.id === "string" ? data.id : undefined;
@@ -357,6 +415,15 @@ const persistRecentReference = (
     return;
   }
 
+  if (
+    command === "evidence_archive" &&
+    isRecord(data.evidence) &&
+    typeof data.evidence.id === "string"
+  ) {
+    recordRecentRef(paths, "evidence", data.evidence.id);
+    return;
+  }
+
   if (command === "branch_create" && typeof data.name === "string") {
     recordRecentRef(paths, "branch", data.name);
     return;
@@ -383,6 +450,8 @@ const KNOWN_CONTEXT_KEYS = new Set([
   "branchId",
   "branchState",
   "createdAt",
+  "action",
+  "failureReason",
   "currentBranchId",
   "dbPath",
   "edges",
@@ -393,6 +462,7 @@ const KNOWN_CONTEXT_KEYS = new Set([
   "headVersionId",
   "id",
   "kind",
+  "backend",
   "lifecycleState",
   "maturityState",
   "name",
@@ -406,6 +476,8 @@ const KNOWN_CONTEXT_KEYS = new Set([
   "reason",
   "relation",
   "researchId",
+  "repairHint",
+  "status",
   "sourceUri",
   "summary",
   "title",
