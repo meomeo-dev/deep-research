@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GRAPH_FONT_FAMILY,
   buildGraphSvgDocument,
   computeGraphLayout,
   measureSvgTextWidth,
@@ -13,7 +14,7 @@ const BOTTOM_PADDING = 84;
 const SVG_TOP_OFFSET = 24;
 const VISIBLE_BOTTOM_BREATHING_ROOM = 60;
 const CARD_CONTENT_WIDTH = 216 - 32;
-const FONT_FAMILY = "Avenir Next, Segoe UI, sans-serif";
+const FONT_FAMILY = GRAPH_FONT_FAMILY;
 
 const measureOccupiedBounds = (
   nodes: GraphLayoutNode[],
@@ -38,6 +39,25 @@ const measureOccupiedBounds = (
 };
 
 describe("graph rendering layout bounds", () => {
+  it("uses a CJK-capable font stack for mixed-language node text", () => {
+    expect(GRAPH_FONT_FAMILY).toContain("PingFang SC");
+    expect(GRAPH_FONT_FAMILY).toContain("Noto Sans CJK SC");
+    expect(GRAPH_FONT_FAMILY.indexOf("PingFang SC")).toBeLessThan(
+      GRAPH_FONT_FAMILY.indexOf("Avenir Next")
+    );
+
+    const titleLines = wrapSvgText("OpenAI GPT 策略演化路径", {
+      fontFamily: FONT_FAMILY,
+      fontSize: 14,
+      fontWeight: 700,
+      maxLines: 2,
+      maxWidth: CARD_CONTENT_WIDTH
+    });
+
+    expect(titleLines[0]).toContain("OpenAI GPT");
+    expect(titleLines.join("")).toContain("策略演化路径");
+  });
+
   it("wraps and truncates long CJK text within the card line budget", () => {
     const titleLines = wrapSvgText(
       "中文节点标题需要在导出图片时稳定换行并在超出两行限制后自动省略尾部信息",

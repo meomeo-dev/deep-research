@@ -94,7 +94,22 @@ const WIDE_CHAR_RANGES = [
   [0x1f300, 0x1faff],
   [0x20000, 0x3fffd]
 ] as const;
-const SVG_FONT_FAMILY = "Avenir Next, Segoe UI, sans-serif";
+// Critical: do not delete or simplify this font stack comment or the font list below.
+// Mixed Chinese/English titles can render as "???" in PNG export if Latin-first fonts win fallback.
+// Keep CJK-capable fonts ahead of Latin UI fonts so SVG text measurement and skia-canvas raster export
+// both pick glyphs that can render mixed-script node titles reliably across common macOS/Windows setups.
+export const GRAPH_FONT_FAMILY = [
+  "'PingFang SC'",
+  "'Hiragino Sans GB'",
+  "'Noto Sans CJK SC'",
+  "'Source Han Sans SC'",
+  "'Microsoft YaHei'",
+  "'Segoe UI'",
+  "'Avenir Next'",
+  "'Helvetica Neue'",
+  'Arial',
+  'sans-serif'
+].join(", ");
 const TEXT_MEASURE_CANVAS = new Canvas(1, 1);
 const TEXT_MEASURE_CONTEXT = TEXT_MEASURE_CANVAS.getContext("2d");
 const TEXT_WIDTH_CACHE = new Map<string, number>();
@@ -332,8 +347,8 @@ export const buildGraphSvgDocument = (input: {
     "    </filter>",
     "  </defs>",
     `  <rect width="${viewWidth}" height="${viewHeight}" fill="url(#paper)" />`,
-    `  <text x="32" y="42" font-family="${SVG_FONT_FAMILY}" font-size="16" font-weight="700" fill="#1e293b">${escapeHtml(input.branchName)}</text>`,
-    `  <text x="32" y="66" font-family="${SVG_FONT_FAMILY}" font-size="12" fill="#6b7280">Nodes: ${input.nodes.length} · Edges: ${input.edges.length}</text>`,
+    `  <text x="32" y="42" font-family="${GRAPH_FONT_FAMILY}" font-size="16" font-weight="700" fill="#1e293b">${escapeHtml(input.branchName)}</text>`,
+    `  <text x="32" y="66" font-family="${GRAPH_FONT_FAMILY}" font-size="12" fill="#6b7280">Nodes: ${input.nodes.length} · Edges: ${input.edges.length}</text>`,
     `  <g transform="translate(0 ${LAYOUT.viewportTopPadding})">${edges}${nodes}</g>`,
     "</svg>"
   ].join("\n");
@@ -436,7 +451,7 @@ const buildNodeCardModel = (
   const headerLines = wrapSvgText(
     `${node.kind} · ${node.workflowState} · ${node.epistemicState}`,
     {
-      fontFamily: SVG_FONT_FAMILY,
+      fontFamily: GRAPH_FONT_FAMILY,
       fontSize: 11,
       fontWeight: 500,
       maxLines: CARD.metaMaxLines,
@@ -444,14 +459,14 @@ const buildNodeCardModel = (
     }
   );
   const titleLines = wrapSvgText(node.title, {
-    fontFamily: SVG_FONT_FAMILY,
+    fontFamily: GRAPH_FONT_FAMILY,
     fontSize: 14,
     fontWeight: 700,
     maxLines: CARD.titleMaxLines,
     maxWidth: CARD.width - CARD.paddingX * 2
   });
   const bodyLines = wrapSvgText(node.body || "No body text.", {
-    fontFamily: SVG_FONT_FAMILY,
+    fontFamily: GRAPH_FONT_FAMILY,
     fontSize: 12,
     fontWeight: 400,
     maxLines: CARD.bodyMaxLines,
@@ -499,7 +514,7 @@ const renderTextBlock = (
         `<tspan x="${x}" dy="${index === 0 ? 0 : lineHeight}">${escapeHtml(line)}</tspan>`
     )
     .join("");
-  return `      <text x="${x}" y="${y}" font-family="${SVG_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}"${attributes}>${tspans}</text>`;
+  return `      <text x="${x}" y="${y}" font-family="${GRAPH_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}"${attributes}>${tspans}</text>`;
 };
 
 export const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {

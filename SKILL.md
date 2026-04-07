@@ -123,7 +123,7 @@ pnpm run install:cli
 ```
 
 - `pnpm run install:cli` 是公开安装入口（public install entrypoint）；它会先执行依赖安装（dependency install）、原生依赖重建（native rebuild）与探针校验（probe verification），再继续执行构建（build）和 `npm link`，把当前仓库产物注册成可直接调用的 `deep-research` 命令。
-- 当前源码包版本是 `deep-research-skill@0.1.2`。
+- 当前源码包版本是 `deep-research-skill@0.1.3`。
 - 当前仓库地址是 `https://github.com/meomeo-dev/deep-research.git`。
 - 仅在源码或发布来源（provenance）已知且可审查时执行安装脚本；若来源不明，先审查 `package.json` / `Makefile` 中的相关脚本，再决定是否安装。
 - 若安装日志出现 `Ignored build scripts`，优先执行 `pnpm run native:prepare`；它会显式运行 `pnpm rebuild better-sqlite3 esbuild`，并在必要时执行 `npm rebuild better-sqlite3`。如果 pnpm 被配置成 `ignore-scripts=true`，先把该配置关掉再执行。
