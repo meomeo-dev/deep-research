@@ -34,11 +34,12 @@ export const writeSuccess = (
   options: OutputOptions
 ): void => {
   const payload = buildSuccessEnvelope(command, data);
-  const sink = resolveOutputSink(command, payload, options);
+  const sink = resolveOutputSink(command, payload.data, options);
+  const plainText = resolvePlainSuccessText(command, payload.data);
   const text =
     options.format === "json"
       ? `${JSON.stringify(payload, null, 2)}\n`
-      : `${formatPlainEnvelope(payload)}\n`;
+      : plainText ?? `${formatPlainEnvelope(payload)}\n`;
 
   if (options.paths) {
     persistRecentReference(command, data, options.paths);
@@ -161,6 +162,27 @@ const deriveSemanticContext = (
           sidecarStatus: status
         },
         summary: `doctor reports sidecar runtime status=${status}.`
+      };
+    }
+
+    if (command === "skillbook") {
+      const characterCount = typeof data.characterCount === "number" ? data.characterCount : undefined;
+      const skillbookPath = typeof data.path === "string" ? data.path : undefined;
+      const referencesRootPath =
+        typeof data.referencesRootPath === "string" ? data.referencesRootPath : undefined;
+      const relativeLinkBasePath =
+        typeof data.relativeLinkBasePath === "string" ? data.relativeLinkBasePath : undefined;
+      return {
+        context: {
+          characterCount,
+          path: skillbookPath,
+          referencesRootPath,
+          relativeLinkBasePath,
+          resultType: "record"
+        },
+        summary:
+          `skillbook returned ${String(characterCount ?? 0)} character(s) from ${skillbookPath ?? "unknown"} ` +
+          `with link base ${relativeLinkBasePath ?? "unknown"} and references root ${referencesRootPath ?? "unknown"}.`
       };
     }
 
@@ -353,13 +375,21 @@ const formatPlainData = (data: unknown): string => {
   return JSON.stringify(data, null, 2);
 };
 
+const resolvePlainSuccessText = (command: string, data: unknown): string | undefined =>
+  extractDocumentText(command, data);
+
 const resolveOutputSink = (
   command: string,
-  payload: CommandEnvelope,
+  data: unknown,
   options: OutputOptions
 ): string | undefined => {
   if (!options.output || options.format === "json") {
     return undefined;
+  }
+
+  const documentText = extractDocumentText(command, data);
+  if (documentText) {
+    return documentText;
   }
 
   const mode = options.outputMode ?? "auto";
@@ -367,7 +397,7 @@ const resolveOutputSink = (
     return undefined;
   }
 
-  const artifact = extractArtifactText(command, payload.data);
+  const artifact = extractArtifactText(command, data);
   if (!artifact) {
     return undefined;
   }
@@ -377,6 +407,14 @@ const resolveOutputSink = (
   }
 
   return ARTIFACT_COMMANDS.has(command) ? artifact : undefined;
+};
+
+const extractDocumentText = (command: string, data: unknown): string | undefined => {
+  if (command === "skillbook" && isRecord(data) && typeof data.content === "string") {
+    return data.content;
+  }
+
+  return undefined;
 };
 
 const extractArtifactText = (command: string, data: unknown): string | undefined => {

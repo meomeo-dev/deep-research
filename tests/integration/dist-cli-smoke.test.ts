@@ -7,6 +7,14 @@ import { ensureDistBuilt } from "../support/ensure-dist-built";
 
 const tempRoots: string[] = [];
 const distCliEntry = path.join(process.cwd(), "dist", "cli", "main.js");
+const packageSkillbookPath = path.join(process.cwd(), "SKILL.md");
+const packageSkillbookContent = fs.readFileSync(packageSkillbookPath, "utf8");
+const packageSkillbookBasePath = path.dirname(packageSkillbookPath);
+const packageSkillbookReferencesRootPath = path.join(
+  packageSkillbookBasePath,
+  "resources",
+  "references"
+);
 
 const createProjectFixture = (): string => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "deep-research-dist-cli-"));
@@ -49,6 +57,60 @@ describe("dist CLI release surface", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("--output-mode <auto|envelope|artifact>");
+    expect(result.stdout).toContain(
+      'skillbook [options]                     Print the packaged SKILL.md handbook or JSON metadata; prefer "--format json" to include "referencesRootPath".'
+    );
+  });
+
+  it("returns the packaged skillbook for the dist CLI regardless of --project", () => {
+    const fixtureRoot = createProjectFixture();
+    const outputPath = path.join(fixtureRoot, "skillbook.json");
+
+    fs.writeFileSync(path.join(fixtureRoot, "SKILL.md"), "project-local dist skillbook", "utf8");
+
+    const plainResult = runDistCli(["skillbook", "--project", fixtureRoot]);
+    const jsonResult = runDistCli(["skillbook", "--project", fixtureRoot, "--format", "json"]);
+    const jsonOutputResult = runDistCli([
+      "skillbook",
+      "--project",
+      fixtureRoot,
+      "--format",
+      "json",
+      "--output",
+      outputPath
+    ]);
+    const payload = JSON.parse(jsonResult.stdout) as {
+      command: string;
+      data: {
+        characterCount: number;
+        content: string;
+        path: string;
+        referencesRootPath: string;
+        relativeLinkBasePath: string;
+      };
+      ok: boolean;
+    };
+    const outputPayload = JSON.parse(fs.readFileSync(outputPath, "utf8")) as typeof payload;
+
+    expect(plainResult.code).toBe(0);
+    expect(plainResult.stdout).toBe(packageSkillbookContent);
+    expect(fs.existsSync(path.join(fixtureRoot, ".deep-research"))).toBe(false);
+
+    expect(jsonResult.code).toBe(0);
+    expect(payload.ok).toBe(true);
+    expect(payload.command).toBe("skillbook");
+    expect(payload.data.content).toBe(packageSkillbookContent);
+    expect(payload.data.path).toBe(packageSkillbookPath);
+    expect(payload.data.characterCount).toBe(packageSkillbookContent.length);
+    expect(payload.data.relativeLinkBasePath).toBe(packageSkillbookBasePath);
+    expect(payload.data.referencesRootPath).toBe(packageSkillbookReferencesRootPath);
+    expect(
+      fs.existsSync(path.join(payload.data.referencesRootPath, "01-scope-and-design.md"))
+    ).toBe(true);
+
+    expect(jsonOutputResult.code).toBe(0);
+    expect(jsonOutputResult.stdout).toBe("");
+    expect(outputPayload).toEqual(payload);
   });
 
   it("persists recent evidence refs across separate dist CLI invocations", () => {

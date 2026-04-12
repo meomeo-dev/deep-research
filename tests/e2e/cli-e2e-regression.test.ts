@@ -7,6 +7,8 @@ import { ensureDistBuilt } from "../support/ensure-dist-built";
 
 const tempRoots: string[] = [];
 const distCliEntry = path.join(process.cwd(), "dist", "cli", "main.js");
+const packageSkillbookPath = path.join(process.cwd(), "SKILL.md");
+const packageSkillbookContent = fs.readFileSync(packageSkillbookPath, "utf8");
 
 type CliResult = {
   code: number;
@@ -421,6 +423,33 @@ describe("CLI e2e regression", () => {
         runJsonCommand(executedCommands, fixtureRoot, "run", ["--mode", "synthesize"]);
         runJsonCommand(executedCommands, fixtureRoot, "run", ["--mode", "review"]);
       },
+      skillbook: () => {
+        fs.writeFileSync(path.join(fixtureRoot, "SKILL.md"), "project-local e2e skillbook", "utf8");
+        const expectedRelativeLinkBasePath = path.dirname(packageSkillbookPath);
+        const expectedReferencesRootPath = path.join(
+          expectedRelativeLinkBasePath,
+          "resources",
+          "references"
+        );
+
+        const payload = runJsonCommand<{
+          characterCount: number;
+          content: string;
+          path: string;
+          referencesRootPath: string;
+          relativeLinkBasePath: string;
+        }>(executedCommands, fixtureRoot, "skillbook");
+
+        expect(payload.data.content).toBe(packageSkillbookContent);
+        expect(payload.data.path).toBe(packageSkillbookPath);
+        expect(payload.data.characterCount).toBe(packageSkillbookContent.length);
+        expect(payload.data.relativeLinkBasePath).toBe(expectedRelativeLinkBasePath);
+        expect(payload.data.referencesRootPath).toBe(expectedReferencesRootPath);
+        expect(
+          fs.existsSync(path.join(payload.data.referencesRootPath, "01-scope-and-design.md"))
+        ).toBe(true);
+        expect(fs.existsSync(path.join(fixtureRoot, ".deep-research"))).toBe(false);
+      },
       status: () => {
         runJsonCommand(executedCommands, fixtureRoot, "status");
       },
@@ -495,6 +524,7 @@ describe("CLI e2e regression", () => {
 
     expect(Object.keys(commandPlans).sort()).toEqual(discoveredCommands);
 
+    runPlan("skillbook");
     runPlan("init");
     runPlan("research_list");
     runPlan("research_search");

@@ -9,6 +9,12 @@ const buildLockDir = path.join(os.tmpdir(), "deep-research-dist-build.lock");
 const buildStampFile = path.join(os.tmpdir(), "deep-research-dist-build.stamp");
 const waitBuffer = new SharedArrayBuffer(4);
 const waitView = new Int32Array(waitBuffer);
+const distBuildInputs = [
+  path.join(process.cwd(), "package.json"),
+  path.join(process.cwd(), "tsconfig.build.json"),
+  path.join(process.cwd(), "tsup.config.ts"),
+  path.join(process.cwd(), "src")
+];
 
 const sleep = (milliseconds: number): void => {
   Atomics.wait(waitView, 0, 0, milliseconds);
@@ -16,15 +22,39 @@ const sleep = (milliseconds: number): void => {
 
 const distIsReady = (): boolean => fs.existsSync(distCliEntry);
 
+const latestInputMtimeMs = (inputPath: string): number => {
+  const stats = fs.statSync(inputPath);
+  if (!stats.isDirectory()) {
+    return stats.mtimeMs;
+  }
+
+  let latest = stats.mtimeMs;
+  for (const entry of fs.readdirSync(inputPath, { withFileTypes: true })) {
+    latest = Math.max(latest, latestInputMtimeMs(path.join(inputPath, entry.name)));
+  }
+
+  return latest;
+};
+
+const distNeedsRebuild = (): boolean => {
+  if (!distIsReady()) {
+    return true;
+  }
+
+  const distMtime = fs.statSync(distCliEntry).mtimeMs;
+  const sourceMtime = Math.max(...distBuildInputs.map((inputPath) => latestInputMtimeMs(inputPath)));
+  return sourceMtime > distMtime;
+};
+
 const waitForOtherBuilder = (): void => {
   const timeoutAt = Date.now() + 120000;
 
   while (Date.now() < timeoutAt) {
-    if (distIsReady()) {
+    if (!distNeedsRebuild()) {
       return;
     }
 
-    if (!fs.existsSync(buildLockDir) && fs.existsSync(buildStampFile)) {
+    if (!fs.existsSync(buildLockDir) && fs.existsSync(buildStampFile) && !distNeedsRebuild()) {
       return;
     }
 
@@ -35,7 +65,7 @@ const waitForOtherBuilder = (): void => {
 };
 
 export const ensureDistBuilt = (): void => {
-  if (distIsReady()) {
+  if (!distNeedsRebuild()) {
     return;
   }
 
@@ -50,7 +80,7 @@ export const ensureDistBuilt = (): void => {
   }
 
   try {
-    if (!distIsReady()) {
+    if (distNeedsRebuild()) {
       const buildResult = spawnSync(packageManager, ["build"], {
         cwd: process.cwd(),
         encoding: "utf8",

@@ -1,5 +1,4 @@
 import asyncio
-from importlib import import_module
 import json
 import os
 import socketserver
@@ -8,6 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError

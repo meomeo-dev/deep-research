@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { isAppError } from "../shared/errors";
-import { addGlobalOptions, createContext } from "./context";
+import { addGlobalOptions, createContext, type GlobalOptions } from "./context";
 import { exportGraphPng } from "./graph-png-export";
 import { openGraphVisualizer, renderGraphVisualizer } from "./graph-visualizer";
 import { writeError, writeSuccess } from "./output";
 import { resolveRecentRef } from "./recent-refs";
+import { readSkillbook } from "./skillbook";
 
 const ensureNonInteractiveApproval = (context: ReturnType<typeof createContext>): void => {
   if (context.options.noInput && !context.options.yes) {
@@ -28,6 +30,15 @@ const outputOptionsFor = (context: ReturnType<typeof createContext>) => ({
   ...context.options,
   paths: context.paths
 });
+
+const outputOptionsForCommand = (command: Command) => {
+  const options = command.optsWithGlobals<GlobalOptions>();
+  return {
+    format: options.format ?? "plain",
+    output: options.output,
+    outputMode: options.outputMode ?? "auto"
+  };
+};
 
 const ensureReportGatesIfNeeded = (
   context: ReturnType<typeof createContext>,
@@ -124,6 +135,10 @@ const ROOT_HELP_GROUPS = [
     title: "Artifact"
   },
   {
+    commands: ["skillbook"],
+    title: "Docs"
+  },
+  {
     commands: ["db_status", "db_migrate", "db_doctor", "doctor", "sidecar_setup"],
     title: "Health"
   }
@@ -169,6 +184,20 @@ export const buildProgram = (): Command => {
   );
 
   program.addHelpText("after", renderRootHelpQuickReference());
+
+  addCommand(
+    program,
+    "skillbook",
+    'Print the packaged SKILL.md handbook or JSON metadata; prefer "--format json" to include "referencesRootPath".'
+  ).action(
+    (_options, command) => {
+      writeSuccess(
+        "skillbook",
+        readSkillbook(fileURLToPath(import.meta.url)),
+        outputOptionsForCommand(command)
+      );
+    }
+  );
 
   program
     .command("init")

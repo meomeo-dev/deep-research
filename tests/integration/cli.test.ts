@@ -11,6 +11,8 @@ const tempRoots: string[] = [];
 const testServers: http.Server[] = [];
 const unixSocketPaths: string[] = [];
 const unixOnlyIt = process.platform === "win32" ? it.skip : it;
+const packageSkillbookPath = path.join(process.cwd(), "SKILL.md");
+const packageSkillbookContent = fs.readFileSync(packageSkillbookPath, "utf8");
 
 const resolvePythonForManagedSidecarTest = (): string => {
   const candidates = [
@@ -163,6 +165,7 @@ describe("CLI", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("research_search");
+    expect(result.stdout).toContain("skillbook");
     expect(result.stdout).toContain("branch_create");
     expect(result.stdout).toContain("graph_check");
     expect(result.stdout).toContain("db_migrate");
@@ -195,9 +198,89 @@ describe("CLI", () => {
     expect(result.stdout).toContain("graph_show, graph_check, graph_snapshot");
     expect(result.stdout).toContain("Artifact:");
     expect(result.stdout).toContain("artifact_list, artifact_add, artifact_export");
+    expect(result.stdout).toContain("Docs:");
+    expect(result.stdout).toContain("skillbook");
+    expect(result.stdout).toContain(
+      'skillbook [options]                     Print the packaged SKILL.md handbook or JSON metadata; prefer "--format json" to include "referencesRootPath".'
+    );
     expect(result.stdout).toContain("Health:");
     expect(result.stdout).toContain("db_status, db_migrate, db_doctor");
     expect(result.stdout).toContain("doctor, sidecar_setup");
+  });
+
+  it("returns raw packaged skillbook content without creating project state", () => {
+    const fixtureRoot = createProjectFixture();
+    const outputPath = path.join(fixtureRoot, "skillbook-copy.md");
+
+    fs.writeFileSync(path.join(fixtureRoot, "SKILL.md"), "project-local skillbook", "utf8");
+
+    const stdoutResult = runCli(["skillbook", "--project", fixtureRoot]);
+    const outputResult = runCli(["skillbook", "--project", fixtureRoot, "--output", outputPath]);
+
+    expect(stdoutResult.code).toBe(0);
+    expect(stdoutResult.stdout).toBe(packageSkillbookContent);
+    expect(fs.existsSync(path.join(fixtureRoot, ".deep-research"))).toBe(false);
+
+    expect(outputResult.code).toBe(0);
+    expect(outputResult.stdout).toBe("");
+    expect(fs.readFileSync(outputPath, "utf8")).toBe(packageSkillbookContent);
+  });
+
+  it("returns skillbook metadata in the existing json envelope", () => {
+    const fixtureRoot = createProjectFixture();
+    const outputPath = path.join(fixtureRoot, "skillbook.json");
+    const expectedRelativeLinkBasePath = path.dirname(packageSkillbookPath);
+    const expectedReferencesRootPath = path.join(
+      expectedRelativeLinkBasePath,
+      "resources",
+      "references"
+    );
+    const expectedScopeDesignPath = path.join(
+      expectedRelativeLinkBasePath,
+      "resources",
+      "references",
+      "01-scope-and-design.md"
+    );
+
+    fs.writeFileSync(path.join(fixtureRoot, "SKILL.md"), "project-local skillbook", "utf8");
+
+    const result = runCli(["skillbook", "--project", fixtureRoot, "--format", "json"]);
+    const outputResult = runCli([
+      "skillbook",
+      "--project",
+      fixtureRoot,
+      "--format",
+      "json",
+      "--output",
+      outputPath
+    ]);
+    const payload = JSON.parse(result.stdout) as {
+      command: string;
+      data: {
+        characterCount: number;
+        content: string;
+        path: string;
+        referencesRootPath: string;
+        relativeLinkBasePath: string;
+      };
+      ok: boolean;
+    };
+    const outputPayload = JSON.parse(fs.readFileSync(outputPath, "utf8")) as typeof payload;
+
+    expect(result.code).toBe(0);
+    expect(payload.ok).toBe(true);
+    expect(payload.command).toBe("skillbook");
+    expect(payload.data.content).toBe(packageSkillbookContent);
+    expect(payload.data.path).toBe(packageSkillbookPath);
+    expect(payload.data.characterCount).toBe(packageSkillbookContent.length);
+    expect(payload.data.relativeLinkBasePath).toBe(expectedRelativeLinkBasePath);
+    expect(payload.data.referencesRootPath).toBe(expectedReferencesRootPath);
+    expect(fs.existsSync(payload.data.referencesRootPath)).toBe(true);
+    expect(fs.existsSync(expectedScopeDesignPath)).toBe(true);
+
+    expect(outputResult.code).toBe(0);
+    expect(outputResult.stdout).toBe("");
+    expect(outputPayload).toEqual(payload);
   });
 
   it("shows descriptive help for common identifiers and graph export flags", () => {

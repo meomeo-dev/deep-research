@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AppError } from "../../shared/errors";
+import { resolvePackageRoot } from "../../shared/package-root";
 
 const CRAWL4AI_ENDPOINT_ENV = "DEEP_RESEARCH_CRAWL4AI_ENDPOINT";
 const CRAWL4AI_SOCKET_ENV = "DEEP_RESEARCH_CRAWL4AI_SOCKET";
@@ -459,24 +460,7 @@ const resolveUtilityCommandPath = (
   return commandName;
 };
 
-const findPackageRoot = (modulePath: string): string => {
-  let cursor = path.dirname(modulePath);
-  while (true) {
-    const packageJsonPath = path.join(cursor, "package.json");
-    if (fs.existsSync(packageJsonPath)) {
-      return cursor;
-    }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) {
-      throw new AppError(
-        "PACKAGE_ROOT_NOT_FOUND",
-        "PACKAGE_ROOT_NOT_FOUND: unable to resolve the deep-research package root for the Crawl4AI sidecar.",
-        2
-      );
-    }
-    cursor = parent;
-  }
-};
+const findPackageRoot = (modulePath: string): string => resolvePackageRoot(modulePath);
 
 const createRuntimeDir = (projectRoot: string): string => {
   const runtimeBase = process.env[CRAWL4AI_RUNTIME_ROOT_ENV]?.trim() || path.join("/tmp", DEFAULT_RUNTIME_DIR_NAME);
