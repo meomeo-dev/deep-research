@@ -27,6 +27,8 @@ ARCHIVE_TITLE = os.environ.get(
 ARCHIVE_SUMMARY = os.environ.get(
     "DEEP_RESEARCH_TEST_ARCHIVE_SUMMARY", "Stub archive summary"
 )
+ARCHIVE_FAILURE_REASON = os.environ.get("DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_REASON", "")
+ARCHIVE_FAILURE_STATUS = os.environ.get("DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_STATUS", "502")
 
 
 class ThreadingUnixHTTPServer(
@@ -55,6 +57,20 @@ class StubRequestHandler(BaseHTTPRequestHandler):
             return
         if self.path != ARCHIVE_PATH:
             self._send_json(404, {"error": f"UNKNOWN_PATH: {self.path}", "ok": False})
+            return
+        if ARCHIVE_FAILURE_REASON:
+            try:
+                status_code = int(ARCHIVE_FAILURE_STATUS)
+            except ValueError:
+                status_code = 502
+            self._send_json(
+                status_code,
+                {
+                    "failureReason": ARCHIVE_FAILURE_REASON,
+                    "ok": False,
+                    "sourceUri": ARCHIVE_SOURCE,
+                },
+            )
             return
         self._send_json(
             200,

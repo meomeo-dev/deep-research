@@ -226,9 +226,12 @@ const archiveWithCrawl4ai = async (input: {
   }
 
   if (!response.ok) {
+    const adapterFailureReason = extractAdapterFailureReason(response.body);
     return buildDegradedResult({
       backend: "crawl4ai",
-      failureReason: `ADAPTER_HTTP_${response.status}: ${response.statusText || "archive adapter returned a non-success status"}`,
+      failureReason:
+        adapterFailureReason ??
+        `ADAPTER_HTTP_${response.status}: ${response.statusText || "archive adapter returned a non-success status"}`,
       sourceUri: input.sourceUri
     });
   }
@@ -283,6 +286,22 @@ const archiveWithCrawl4ai = async (input: {
     summary,
     title
   };
+};
+
+const extractAdapterFailureReason = (body: string): string | null => {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; failureReason?: unknown };
+    if (typeof parsed.failureReason === "string" && parsed.failureReason.trim().length > 0) {
+      return parsed.failureReason.trim();
+    }
+    if (typeof parsed.error === "string" && parsed.error.trim().length > 0) {
+      return parsed.error.trim();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 };
 
 interface AdapterHttpResponse {

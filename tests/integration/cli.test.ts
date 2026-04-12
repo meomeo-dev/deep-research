@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { createFakeCrawl4aiPackage } from "../support/fake-crawl4ai-package";
 
 const tempRoots: string[] = [];
 const testServers: http.Server[] = [];
@@ -15,22 +16,28 @@ const resolvePythonForManagedSidecarTest = (): string => {
   const candidates = [
     process.env.DEEP_RESEARCH_CRAWL4AI_PYTHON,
     process.env.PYTHON,
-    "/usr/bin/python3",
-    "/opt/homebrew/bin/python3",
     "/opt/homebrew/bin/python3.13",
+    "/opt/homebrew/bin/python3.12",
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3.10",
+    "/usr/bin/python3",
     "python3"
   ].filter((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
 
   for (const candidate of candidates) {
-    const result = spawnSync(candidate, ["--version"], {
-      encoding: "utf8"
-    });
+    const result = spawnSync(
+      candidate,
+      ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"],
+      {
+        encoding: "utf8"
+      }
+    );
     if ((result.status ?? 1) === 0) {
       return candidate;
     }
   }
 
-  throw new Error("A Python 3 interpreter is required for the managed Crawl4AI sidecar integration test.");
+  throw new Error("A Python 3.10+ interpreter is required to execute the real Crawl4AI sidecar integration test.");
 };
 
 const createProjectFixture = (): string => {
@@ -2152,6 +2159,169 @@ describe("CLI", () => {
     expect(evidenceList.data[0]?.sourceUri).toBe("https://example.com/managed-canonical");
   }, 15000);
 
+  unixOnlyIt("preserves anti-bot failureReason prefixes from a managed crawl4ai sidecar", async () => {
+    const fixtureRoot = createProjectFixture();
+    const manifestPath = path.join(fixtureRoot, ".deep-research", "crawl4ai-sidecar.json");
+    const realPythonExecutable = resolvePythonForManagedSidecarTest();
+    const pythonExecutable = createExecutableScript(
+      path.join(fixtureRoot, "managed-python.sh"),
+      [
+        "#!/bin/sh",
+        'if [ "$1" = "--version" ]; then',
+        `  exec "${realPythonExecutable}" --version`,
+        "fi",
+        'if [ "$1" = "-c" ] && [ "$2" = "import crawl4ai" ]; then',
+        "  exit 0",
+        "fi",
+        `exec "${realPythonExecutable}" "$@"`
+      ].join("\n")
+    );
+    const serviceScript = path.join(process.cwd(), "tests", "fixtures", "crawl4ai_stub_service.py");
+    const antiBotFailure =
+      "CRAWL4AI_ANTIBOT_CHALLENGE: Access Denied by bot defense | probe: status=403 ; x-tengine-error=denied by bot";
+    const extraEnv = {
+      DEEP_RESEARCH_CRAWL4AI_PYTHON: pythonExecutable,
+      DEEP_RESEARCH_CRAWL4AI_SERVICE_SCRIPT: serviceScript,
+      DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_REASON: antiBotFailure,
+      DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_STATUS: "502",
+      DEEP_RESEARCH_TEST_ARCHIVE_SOURCE: "https://example.com/managed-antibot"
+    };
+
+    expect(
+      runCli(
+        [
+          "init",
+          "--project",
+          fixtureRoot,
+          "--title",
+          "Managed anti-bot archive CLI",
+          "--question",
+          "Will managed sidecar anti-bot failureReason prefixes survive CLI degraded output?",
+          "--format",
+          "json"
+        ],
+        fixtureRoot,
+        extraEnv
+      ).code
+    ).toBe(0);
+
+    const result = await runCliAsync(
+      [
+        "evidence_archive",
+        "--project",
+        fixtureRoot,
+        "--source",
+        "https://example.com/protected.pdf",
+        "--format",
+        "json"
+      ],
+      fixtureRoot,
+      extraEnv
+    );
+
+    if (result.code !== 0) {
+      throw new Error(`CLI failed\nSTDERR:\n${result.stderr}\nSTDOUT:\n${result.stdout}`);
+    }
+    expect(fs.existsSync(manifestPath)).toBe(false);
+
+    const payload = JSON.parse(result.stdout) as {
+      data: {
+        archive: { failureReason: string | null; status: string };
+        evidence: { archiveStatus: string; failureReason: string | null };
+      };
+      summary: string;
+    };
+
+    expect(payload.summary).toContain("archive degraded");
+    expect(payload.data.archive.status).toBe("degraded");
+    expect(payload.data.archive.failureReason).toBe(antiBotFailure);
+    expect(payload.data.evidence.archiveStatus).toBe("degraded");
+    expect(payload.data.evidence.failureReason).toBe(antiBotFailure);
+  }, 15000);
+
+  unixOnlyIt("probes anti-bot evidence before final failure classification in the real managed sidecar", async () => {
+    const fixtureRoot = createProjectFixture();
+    const manifestPath = path.join(fixtureRoot, ".deep-research", "crawl4ai-sidecar.json");
+    const realPythonExecutable = resolvePythonForManagedSidecarTest();
+    const setupCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-setup"), "#!/bin/sh\nexit 0\n");
+    const doctorCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-doctor"), "#!/bin/sh\nexit 0\n");
+    const fakePackageRoot = createFakeCrawl4aiPackage(fixtureRoot, {
+      errorMessage: "Access Denied by bot defense"
+    });
+    const serviceScript = path.join(process.cwd(), "resources", "sidecar", "crawl4ai_service.py");
+    const protectedOrigin = await startJsonServer((_request, response) => {
+      response.writeHead(403, {
+        "content-type": "text/html",
+        "x-tengine-error": "denied by bot"
+      });
+      response.end("Access denied");
+    });
+    const sourceUrl = `${protectedOrigin}/protected`;
+    const expectedFailureReason =
+      "CRAWL4AI_ANTIBOT_CHALLENGE: Access Denied by bot defense | probe: status=403 ; content-type=text/html ; x-tengine-error=denied by bot";
+    const pythonPath = [fakePackageRoot, process.env.PYTHONPATH]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(path.delimiter);
+    const extraEnv = {
+      DEEP_RESEARCH_CRAWL4AI_DOCTOR_COMMAND: doctorCommand,
+      DEEP_RESEARCH_CRAWL4AI_PYTHON: realPythonExecutable,
+      DEEP_RESEARCH_CRAWL4AI_SERVICE_SCRIPT: serviceScript,
+      DEEP_RESEARCH_CRAWL4AI_SETUP_COMMAND: setupCommand,
+      PYTHONPATH: pythonPath
+    };
+
+    expect(
+      runCli(
+        [
+          "init",
+          "--project",
+          fixtureRoot,
+          "--title",
+          "Managed sidecar causal chain CLI",
+          "--question",
+          "Will the real sidecar probe antibot evidence before final classification?",
+          "--format",
+          "json"
+        ],
+        fixtureRoot,
+        extraEnv
+      ).code
+    ).toBe(0);
+
+    const result = await runCliAsync(
+      [
+        "evidence_archive",
+        "--project",
+        fixtureRoot,
+        "--source",
+        sourceUrl,
+        "--format",
+        "json"
+      ],
+      fixtureRoot,
+      extraEnv
+    );
+
+    if (result.code !== 0) {
+      throw new Error(`CLI failed\nSTDERR:\n${result.stderr}\nSTDOUT:\n${result.stdout}`);
+    }
+    expect(fs.existsSync(manifestPath)).toBe(false);
+
+    const payload = JSON.parse(result.stdout) as {
+      data: {
+        archive: { failureReason: string | null; status: string };
+        evidence: { archiveStatus: string; failureReason: string | null };
+      };
+      summary: string;
+    };
+
+    expect(payload.summary).toContain("archive degraded");
+    expect(payload.data.archive.status).toBe("degraded");
+    expect(payload.data.archive.failureReason).toBe(expectedFailureReason);
+    expect(payload.data.evidence.archiveStatus).toBe("degraded");
+    expect(payload.data.evidence.failureReason).toBe(expectedFailureReason);
+  }, 15000);
+
   it("uses explicit TCP fallback when a crawl4ai endpoint is provided and does not leak body text to stdout", async () => {
     const fixtureRoot = createProjectFixture();
     const archiveBody = "ADAPTER_ARCHIVE_BODY_SIGNAL";
@@ -2221,6 +2391,64 @@ describe("CLI", () => {
     expect(evidenceList.data[0]?.sourceUri).toBe("https://example.com/adapter-canonical");
     expect(artifactList.data[0]?.artifactKind).toBe("web_archive");
     expect(artifactList.data[0]?.evidenceId).toBe(evidenceList.data[0]?.id);
+  });
+
+  it("preserves sidecar failureReason when crawl4ai adapter returns HTTP 500 with JSON payload", async () => {
+    const fixtureRoot = createProjectFixture();
+    const backendEndpoint = await startJsonServer((_request, response) => {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: false,
+          failureReason: "CRAWL4AI_ARCHIVE_FAILED: pdf parser crashed"
+        })
+      );
+    });
+
+    expect(
+      runCli(
+        [
+          "init",
+          "--project",
+          fixtureRoot,
+          "--title",
+          "Archive adapter failure reason",
+          "--question",
+          "Will adapter failureReason be preserved from a non-2xx JSON response?",
+          "--format",
+          "json"
+        ],
+        fixtureRoot
+      ).code
+    ).toBe(0);
+
+    const failingEndpoint = await runCliAsync(
+      [
+        "evidence_archive",
+        "--project",
+        fixtureRoot,
+        "--source",
+        "https://example.com/adapter-source",
+        "--backend-endpoint",
+        backendEndpoint,
+        "--format",
+        "json"
+      ],
+      fixtureRoot
+    );
+
+    expect(failingEndpoint.code).toBe(0);
+    const payload = JSON.parse(failingEndpoint.stdout) as {
+      data: {
+        archive: { failureReason: string | null; status: string };
+        evidence: { failureReason: string | null };
+      };
+      summary: string;
+    };
+
+    expect(payload.data.archive.status).toBe("degraded");
+    expect(payload.data.archive.failureReason).toContain("CRAWL4AI_ARCHIVE_FAILED");
+    expect(payload.data.evidence.failureReason).toContain("CRAWL4AI_ARCHIVE_FAILED");
   });
 
   it("returns degraded evidence_archive records when node fallback cannot archive content", () => {
