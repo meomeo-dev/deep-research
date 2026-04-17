@@ -135,7 +135,7 @@ pnpm run install:cli
 ```
 
 - `pnpm run install:cli` 是公开安装入口；它会安装依赖、准备原生模块、构建产物并执行 `npm link`。
-- 当前源码包版本是 `deep-research-skill@0.1.7`，仓库地址是 `https://github.com/meomeo-dev/deep-research.git`。
+- 当前源码包版本是 `deep-research-skill@0.1.8`，仓库地址是 `https://github.com/meomeo-dev/deep-research.git`。
 - 若安装日志出现 `Ignored build scripts`，优先执行 `pnpm run native:prepare`；如果你改过源码后要刷新本地命令面，用 `pnpm run relink:cli`。
 - 偏好 `make` 时，等价命令是 `make install-cli`。
 

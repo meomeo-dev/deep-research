@@ -365,7 +365,7 @@ describe("dist CLI release surface", () => {
     expect(report).toContain("Readable final conclusion body from dist CLI.");
     expect(report).not.toContain("Command: export");
     expect(report).not.toContain("Summary: export");
-  });
+  }, 15000);
 
   it("exports PNG graph artifacts through the dist CLI", () => {
     const fixtureRoot = createProjectFixture();

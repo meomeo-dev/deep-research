@@ -600,10 +600,10 @@ const renderMixedScriptLine = (
 const segmentTextByScript = (
   text: string
 ): Array<{ script: "cjk" | "latin"; text: string }> => {
-  const segments: Array<{ script: "cjk" | "latin"; text: string }> = [];
+  const segments: Array<{ script: "cjk" | "latin" | "neutral"; text: string }> = [];
 
   for (const char of Array.from(text)) {
-    const script = classifyTextScript(char, segments.at(-1)?.script);
+    const script = classifyTextScript(char);
     const previous = segments.at(-1);
     if (previous?.script === script) {
       previous.text += char;
@@ -613,13 +613,10 @@ const segmentTextByScript = (
     segments.push({ script, text: char });
   }
 
-  return segments;
+  return resolveSegmentScripts(segments);
 };
 
-const classifyTextScript = (
-  char: string,
-  previousScript: "cjk" | "latin" | undefined
-): "cjk" | "latin" => {
+const classifyTextScript = (char: string): "cjk" | "latin" | "neutral" => {
   if (isWideCharacter(char)) {
     return "cjk";
   }
@@ -628,12 +625,108 @@ const classifyTextScript = (
     return "latin";
   }
 
-  const codePoint = char.codePointAt(0);
-  if (codePoint !== undefined && codePoint <= 0x024f) {
-    return previousScript ?? "latin";
+  return "neutral";
+};
+
+const resolveSegmentScripts = (
+  segments: Array<{ script: "cjk" | "latin" | "neutral"; text: string }>
+): Array<{ script: "cjk" | "latin"; text: string }> => {
+  if (segments.length > 0 && segments.every((segment) => segment.script === "neutral")) {
+    return resolveNeutralOnlySegments(segments);
   }
 
-  return previousScript ?? "cjk";
+  const resolved: Array<{
+    script: "cjk" | "latin";
+    sourceScript: "cjk" | "latin" | "neutral";
+    text: string;
+  }> = [];
+
+  for (const [index, segment] of segments.entries()) {
+    const script =
+      segment.script === "neutral"
+        ? resolveNeutralSegmentScript(segments, index)
+        : segment.script;
+    const previous = resolved.at(-1);
+    if (
+      previous?.script === script &&
+      !shouldPreserveNeutralCjkBoundary(previous.sourceScript, segment.script, script)
+    ) {
+      previous.text += segment.text;
+      continue;
+    }
+
+    resolved.push({ script, sourceScript: segment.script, text: segment.text });
+  }
+
+  return resolved.map(({ script: resolvedScript, text }) => ({
+    script: resolvedScript,
+    text
+  }));
+};
+
+const resolveNeutralOnlySegments = (
+  segments: Array<{ script: "cjk" | "latin" | "neutral"; text: string }>
+): Array<{ script: "latin"; text: string }> =>
+  segments.flatMap((segment) =>
+    Array.from(segment.text).map((char) => ({
+      script: "latin" as const,
+      text: char
+    }))
+  );
+
+const shouldPreserveNeutralCjkBoundary = (
+  previousSourceScript: "cjk" | "latin" | "neutral" | undefined,
+  currentSourceScript: "cjk" | "latin" | "neutral",
+  resolvedScript: "cjk" | "latin"
+): boolean => {
+  if (resolvedScript !== "cjk") {
+    return false;
+  }
+
+  // skia-canvas can rasterize leading neutral ASCII/symbol glyphs and following CJK glyphs
+  // as missing boxes when they live inside one CJK tspan. Keep the boundary, but preserve
+  // the same resolved script so the neutral run still inherits the intended font stack.
+  return previousSourceScript === "neutral" || currentSourceScript === "neutral";
+};
+
+const resolveNeutralSegmentScript = (
+  segments: Array<{ script: "cjk" | "latin" | "neutral"; text: string }>,
+  index: number
+): "cjk" | "latin" => {
+  // Inline punctuation should stay visually attached to the text the user just read.
+  // Only leading neutral runs look ahead because they have no prior strong script to inherit.
+  const previousStrongScript = findStrongScript(segments, index, -1);
+  if (previousStrongScript) {
+    return previousStrongScript;
+  }
+
+  const nextStrongScript = findStrongScript(segments, index, 1);
+  if (nextStrongScript) {
+    return nextStrongScript;
+  }
+
+  return "latin";
+};
+
+const findStrongScript = (
+  segments: Array<{ script: "cjk" | "latin" | "neutral"; text: string }>,
+  startIndex: number,
+  step: -1 | 1
+): "cjk" | "latin" | undefined => {
+  for (
+    let index = startIndex + step;
+    index >= 0 && index < segments.length;
+    index += step
+  ) {
+    const candidate = segments[index];
+    if (candidate?.script === "neutral") {
+      continue;
+    }
+
+    return candidate?.script;
+  }
+
+  return undefined;
 };
 
 export const wrapSvgText = (text: string, options: WrapTextOptions): string[] => {

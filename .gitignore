@@ -27,4 +27,8 @@ db/*.db
 examples/readme-dag-50-demo/project/
 examples/readme-dag-50-demo/deep-research-demo-dag-50.html
 examples/readme-dag-50-demo/deep-research-demo-dag-50.summary.json
+examples/leading-symbol-font-fallback-demo/project/
+examples/leading-symbol-font-fallback-demo/leading-symbol-font-fallback-demo.html
+examples/leading-symbol-font-fallback-demo/leading-symbol-font-fallback-demo.png
+examples/leading-symbol-font-fallback-demo/leading-symbol-font-fallback-demo.summary.json
 docs/design/graph-export/20260406_graph_export_png_engine_adopt-skia-canvas.Design.MD

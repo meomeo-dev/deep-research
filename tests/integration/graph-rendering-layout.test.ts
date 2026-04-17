@@ -82,9 +82,165 @@ describe("graph rendering layout bounds", () => {
     expect(svg).toContain("font-family=\"'Avenir Next'");
     expect(svg).toContain("font-family=\"'Hiragino Sans GB'");
     expect(svg).toContain("English mixed text");
-    expect(svg).toContain("与 中文");
+    expect(svg).toContain(">与</tspan>");
+    expect(svg).toContain(">中文</tspan>");
     expect(svg).toContain("body ");
     expect(svg).toContain("一起出现");
+  });
+
+  it.skip("documents the historical leading-symbol font-family fallback state before neutral resolution", async () => {
+    const nodes = [
+      {
+        body: "• English title",
+        epistemicState: "untested" as const,
+        id: "node-symbol-english",
+        kind: "evidence" as const,
+        title: "→ Mixed 混排 title",
+        workflowState: "draft" as const
+      },
+      {
+        body: "【标记】English 与 中文",
+        epistemicState: "supported" as const,
+        id: "node-symbol-cjk",
+        kind: "finding" as const,
+        title: "- 中文标题",
+        workflowState: "ready" as const
+      }
+    ];
+
+    const { edges, layoutNodes, viewport } = await computeGraphLayout(nodes, [], {});
+    const svg = buildGraphSvgDocument({
+      branchName: "leading-symbol-font-state",
+      edges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>• <\/tspan>/
+    );
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>→ <\/tspan>/
+    );
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>- <\/tspan>/
+    );
+    expect(svg).toContain("Mixed ");
+    expect(svg).toContain("中文标题");
+    expect(svg).toContain("【标记】");
+  });
+
+  it("assigns leading neutral symbols to the following strong script without collapsing CJK-boundary tspans", async () => {
+    const nodes = [
+      {
+        body: "• English title",
+        epistemicState: "untested" as const,
+        id: "node-neutral-english",
+        kind: "evidence" as const,
+        title: "→ Mixed 混排 title",
+        workflowState: "draft" as const
+      },
+      {
+        body: "【标记】English 与 中文",
+        epistemicState: "supported" as const,
+        id: "node-neutral-cjk",
+        kind: "finding" as const,
+        title: "- 中文标题",
+        workflowState: "ready" as const
+      }
+    ];
+
+    const { edges, layoutNodes, viewport } = await computeGraphLayout(nodes, [], {});
+    const svg = buildGraphSvgDocument({
+      branchName: "leading-neutral-target-behavior",
+      edges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>• English title<\/tspan>/
+    );
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>→ Mixed <\/tspan>/
+    );
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>- <\/tspan>\s*<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>中文标题<\/tspan>/
+    );
+  });
+
+  it.each([
+    "- 中文标题",
+    "• 中文标题",
+    "→ 中文标题"
+  ])("keeps leading neutral CJK runs split for %s", async (text) => {
+    const nodes = [
+      {
+        body: "Neutral split probe",
+        epistemicState: "supported" as const,
+        id: `node-leading-neutral-${text.length}`,
+        kind: "finding" as const,
+        title: text,
+        workflowState: "resolved" as const
+      }
+    ];
+
+    const { edges, layoutNodes, viewport } = await computeGraphLayout(nodes, [], {});
+    const svg = buildGraphSvgDocument({
+      branchName: "leading-neutral-cjk-split",
+      edges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).toMatch(
+      /<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>[^\u4e00-\u9fff]*<\/tspan>\s*<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>中文标题<\/tspan>/
+    );
+  });
+
+  it.each([
+    {
+      expectedPattern: /<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>English • <\/tspan>/,
+      label: "inherits the previous Latin run for inline neutral punctuation",
+      text: "English • 中文"
+    },
+    {
+      expectedPattern:
+        /<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*>中文<\/tspan>\s*<tspan[^>]*font-family="'Hiragino Sans GB'[^"]*"[^>]*> → <\/tspan>/,
+      label: "inherits the previous CJK run for inline neutral punctuation while preserving a safe boundary",
+      text: "中文 → English"
+    },
+    {
+      expectedPattern:
+        /<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>•<\/tspan>\s*<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*> <\/tspan>\s*<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>→<\/tspan>\s*<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*> <\/tspan>\s*<tspan[^>]*font-family="'Avenir Next'[^"]*"[^>]*>-<\/tspan>/,
+      label: "falls back to Latin when a line contains only neutral symbols while keeping symbols in safe standalone runs",
+      text: "• → -"
+    }
+  ])("$label", async ({ expectedPattern, text }) => {
+    const nodes = [
+      {
+        body: text,
+        epistemicState: "untested" as const,
+        id: `node-${text.length}`,
+        kind: "evidence" as const,
+        title: "Neutral precedence probe",
+        workflowState: "draft" as const
+      }
+    ];
+
+    const { edges, layoutNodes, viewport } = await computeGraphLayout(nodes, [], {});
+    const svg = buildGraphSvgDocument({
+      branchName: "neutral-precedence-probe",
+      edges,
+      height: viewport.height,
+      nodes: layoutNodes,
+      width: viewport.width
+    });
+
+    expect(svg).toMatch(expectedPattern);
   });
 
   it("wraps and truncates long CJK text within the card line budget", () => {

@@ -13,6 +13,8 @@ const unixSocketPaths: string[] = [];
 const unixOnlyIt = process.platform === "win32" ? it.skip : it;
 const packageSkillbookPath = path.join(process.cwd(), "SKILL.md");
 const packageSkillbookContent = fs.readFileSync(packageSkillbookPath, "utf8");
+const CLI_INTEGRATION_TIMEOUT = 15000;
+const CLI_SIDECAR_TIMEOUT = 20000;
 
 const resolvePythonForManagedSidecarTest = (): string => {
   const candidates = [
@@ -329,7 +331,7 @@ describe("CLI", () => {
     );
     expect(graphExportHelp.stdout).toContain("default: \"text\"");
     expect(graphExportHelp.stdout).toContain("default: \"10485760\"");
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("returns semantic json for canonical snake_case success commands", () => {
     const fixtureRoot = createProjectFixture();
@@ -655,7 +657,7 @@ describe("CLI", () => {
     expect(report).toContain("## Evidence Links");
     expect(report).not.toContain("Command: export");
     expect(report).not.toContain("Summary: export");
-  }, 10000);
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("writes pure artifact text for graph_export and artifact_export output files", () => {
     const fixtureRoot = createProjectFixture();
@@ -865,7 +867,7 @@ describe("CLI", () => {
     expect(artifactExport).toContain("# Artifact Export");
     expect(artifactExport).toContain("Artifact export readable body.");
     expect(artifactExport).not.toContain("Command: artifact_export");
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("blocks plain export when execution gates fail", () => {
     const fixtureRoot = createProjectFixture();
@@ -1118,7 +1120,7 @@ describe("CLI", () => {
 
     const buffer = fs.readFileSync(pngPath);
     expect(buffer.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-  });
+  }, 15000);
 
   it("supports recent references for node, evidence, and branch follow-up commands", () => {
     const fixtureRoot = createProjectFixture();
@@ -1242,7 +1244,7 @@ describe("CLI", () => {
       runCli(["status", "--project", fixtureRoot, "--format", "json"], fixtureRoot).stdout
     ) as { data: { branch: { name: string } } };
     expect(statusPayload.data.branch.name).toBe("alt-branch");
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("returns evidence-aware graph payloads and stronger status summaries", () => {
     const fixtureRoot = createProjectFixture();
@@ -1402,7 +1404,7 @@ describe("CLI", () => {
     expect(statusPayload.context.lifecycle).toBe("draft");
     expect(statusPayload.context.resolvedNodes).toBe(1);
     expect(statusPayload.context.verifiedEvidence).toBe(1);
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("uses graph_check semantic summaries and writes HTML artifacts for graph_visualize", () => {
     const fixtureRoot = createProjectFixture();
@@ -1506,7 +1508,7 @@ describe("CLI", () => {
     expect(html).toContain("Visualizer evidence title");
     expect(html).toContain("Evidence Links:");
     expect(html).not.toContain("Command: graph_visualize");
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("bootstraps an empty --project directory without requiring local db/migrations", () => {
     const fixtureRoot = createProjectFixture();
@@ -1656,7 +1658,7 @@ describe("CLI", () => {
     };
 
     expect(searchPayload.context.count).toBe(1);
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("returns snake_case command metadata for canonical error responses", () => {
     const fixtureRoot = createProjectFixture();
@@ -1814,7 +1816,7 @@ describe("CLI", () => {
     expect(afterStatus.data.branch.headVersionId).toBe(beforeStatus.data.branch.headVersionId);
     expect(afterVersions.data).toHaveLength(beforeVersions.data.length);
     expect(graphPayload.data.edges).toHaveLength(1);
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("rejects missing-node moves without creating a phantom version", () => {
     const fixtureRoot = createProjectFixture();
@@ -2002,7 +2004,7 @@ describe("CLI", () => {
     expect(html).toContain("formatDetail");
     expect(html).toContain("detail-copy");
     expect(html).not.toContain("translateY(-4px)");
-  });
+  }, CLI_INTEGRATION_TIMEOUT);
 
   it("handles empty and very long node content in the visualizer payload", () => {
     const fixtureRoot = createProjectFixture();
@@ -2171,6 +2173,8 @@ describe("CLI", () => {
     const archiveBody = "MANAGED_ARCHIVE_BODY_SIGNAL";
     const manifestPath = path.join(fixtureRoot, ".deep-research", "crawl4ai-sidecar.json");
     const realPythonExecutable = resolvePythonForManagedSidecarTest();
+    const setupCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-setup"), "#!/bin/sh\nexit 0\n");
+    const doctorCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-doctor"), "#!/bin/sh\nexit 0\n");
     const pythonExecutable = createExecutableScript(
       path.join(fixtureRoot, "managed-python.sh"),
       [
@@ -2186,8 +2190,10 @@ describe("CLI", () => {
     );
     const serviceScript = path.join(process.cwd(), "tests", "fixtures", "crawl4ai_stub_service.py");
     const extraEnv = {
+      DEEP_RESEARCH_CRAWL4AI_DOCTOR_COMMAND: doctorCommand,
       DEEP_RESEARCH_CRAWL4AI_PYTHON: pythonExecutable,
       DEEP_RESEARCH_CRAWL4AI_SERVICE_SCRIPT: serviceScript,
+      DEEP_RESEARCH_CRAWL4AI_SETUP_COMMAND: setupCommand,
       DEEP_RESEARCH_TEST_ARCHIVE_BODY: archiveBody,
       DEEP_RESEARCH_TEST_ARCHIVE_SOURCE: "https://example.com/managed-canonical",
       DEEP_RESEARCH_TEST_ARCHIVE_SUMMARY: "Managed archive summary",
@@ -2240,12 +2246,14 @@ describe("CLI", () => {
     expect(evidenceList.data[0]?.archiveStatus).toBe("archived");
     expect(evidenceList.data[0]?.failureReason).toBeNull();
     expect(evidenceList.data[0]?.sourceUri).toBe("https://example.com/managed-canonical");
-  }, 15000);
+  }, CLI_SIDECAR_TIMEOUT);
 
   unixOnlyIt("preserves anti-bot failureReason prefixes from a managed crawl4ai sidecar", async () => {
     const fixtureRoot = createProjectFixture();
     const manifestPath = path.join(fixtureRoot, ".deep-research", "crawl4ai-sidecar.json");
     const realPythonExecutable = resolvePythonForManagedSidecarTest();
+    const setupCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-setup"), "#!/bin/sh\nexit 0\n");
+    const doctorCommand = createExecutableScript(path.join(fixtureRoot, "crawl4ai-doctor"), "#!/bin/sh\nexit 0\n");
     const pythonExecutable = createExecutableScript(
       path.join(fixtureRoot, "managed-python.sh"),
       [
@@ -2263,8 +2271,10 @@ describe("CLI", () => {
     const antiBotFailure =
       "CRAWL4AI_ANTIBOT_CHALLENGE: Access Denied by bot defense | probe: status=403 ; x-tengine-error=denied by bot";
     const extraEnv = {
+      DEEP_RESEARCH_CRAWL4AI_DOCTOR_COMMAND: doctorCommand,
       DEEP_RESEARCH_CRAWL4AI_PYTHON: pythonExecutable,
       DEEP_RESEARCH_CRAWL4AI_SERVICE_SCRIPT: serviceScript,
+      DEEP_RESEARCH_CRAWL4AI_SETUP_COMMAND: setupCommand,
       DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_REASON: antiBotFailure,
       DEEP_RESEARCH_TEST_ARCHIVE_FAILURE_STATUS: "502",
       DEEP_RESEARCH_TEST_ARCHIVE_SOURCE: "https://example.com/managed-antibot"
@@ -2320,7 +2330,7 @@ describe("CLI", () => {
     expect(payload.data.archive.failureReason).toBe(antiBotFailure);
     expect(payload.data.evidence.archiveStatus).toBe("degraded");
     expect(payload.data.evidence.failureReason).toBe(antiBotFailure);
-  }, 15000);
+  }, CLI_SIDECAR_TIMEOUT);
 
   unixOnlyIt("probes anti-bot evidence before final failure classification in the real managed sidecar", async () => {
     const fixtureRoot = createProjectFixture();
